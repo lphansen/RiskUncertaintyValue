@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore")
 """
 This Python script solves the Bansal Yaron Long-run risk model, computes and plots the shock elasticities, given specific parameter values. 
 
-Updated on Dec. 18, 2022, 4.26 P.M. CT
+Updated on Dec. 19, 2022, 1.08 A.M. CT
 """
 
 from uncertain_expansion import uncertain_expansion
@@ -142,19 +142,14 @@ def solve_BY(ρ= 2./3):
 # res_015 = solve_BY(ρ= 1.5)
 # res_100 = solve_BY(ρ= 10)
 
-def solve_BY_elas(γ=10, β=.998, ρ=2./3, μ=0.0015, ϕ_c=0.0078):
+def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1=0.987, σ_w = 0.23 * 1e-5 / 0.0078**2, μ=0.0015, ϕ_c=0.0078):
 
     σ_original = 0.0078
-    α = 0.979
-    ϕ_e = 0.044 * σ_original
     σ_squared = 1.0
-    ν_1 = 0.987
-    σ_w = 0.23 * 1e-5 / σ_original**2
     μ_d = 0.0015
     ϕ = 3.0
     ϕ_d = 4.5 * σ_original
     π = 0.0
-
     
     args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π)
 
@@ -203,7 +198,7 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, μ=0.0015, ϕ_c=0.0078):
             sns.lineplot(data = plot_expo_elas[i],  x = 'T', y = qt[j], ax=axes[0,i], color = colors[j], label = qt[j])
             axes[0,i].set_xlabel('')
             axes[0,i].set_ylabel('Exposure elasticity')
-            axes[0,i].set_ylim([0,0.02])
+            axes[0,i].set_ylim([0,0.045])
             axes[0,i].set_title('Exposure Elasticity with respect to the ' + shock_name[i])
 
     for i in range(len(plot_price_elas)):
@@ -211,14 +206,18 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, μ=0.0015, ϕ_c=0.0078):
             sns.lineplot(data = plot_price_elas[i],  x = 'T', y = qt[j], ax=axes[1,i], color = colors[j], label = qt[j])
             axes[1,i].set_xlabel('')
             axes[1,i].set_ylabel('Price elasticity')
-            axes[1,i].set_ylim([0,0.35])
+            axes[1,i].set_ylim([0,0.45])
             axes[1,i].set_title('Price Elasticity with respect to the '+ shock_name[i])
     fig.suptitle('Shock Elasticity for the Consumption Growth')
     fig.tight_layout()
     print('Current paramter settings')
-    print('γ = '+str("{:.4f}".format(γ)))
-    print('β = '+str("{:.4f}".format(β)))
-    print('ρ = '+str("{:.4f}".format(ρ)))
-    print('μ = '+str("{:.4f}".format(μ)))
-    print(r'ϕ_c = '+str("{:.4f}".format(ϕ_c)))
+    print('γ = '+str("{:.4g}".format(γ)))
+    print('β = '+str("{:.4g}".format(β)))
+    print('ρ = '+str("{:.4g}".format(ρ)))
+    print('α = '+str("{:.4g}".format(α)))
+    print('ϕ_e = '+str("{:.4g}".format(ϕ_e)))
+    print('ν_1 = '+str("{:.4g}".format(ν_1)))
+    print('σ_w = '+str("{:.4g}".format(σ_w)))
+    print('μ = '+str("{:.4g}".format(μ)))
+    print('ϕ_c = '+str("{:.4g}".format(ϕ_c)))
     plt.show()
