@@ -137,10 +137,10 @@ def solve_BY(ρ= 2./3):
 
     return res
 
-res_006 = solve_BY(ρ= 2./3)
-res_010 = solve_BY(ρ= 1.00001)
-res_015 = solve_BY(ρ= 1.5)
-res_100 = solve_BY(ρ= 10)
+# res_006 = solve_BY(ρ= 2./3)
+# res_010 = solve_BY(ρ= 1.00001)
+# res_015 = solve_BY(ρ= 1.5)
+# res_100 = solve_BY(ρ= 10)
 
 def solve_BY_elas(γ=10, β=.998, ρ=2./3, μ=0.0015, ϕ_c=0.0078):
 
