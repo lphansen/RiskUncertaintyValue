@@ -142,15 +142,6 @@ res_010 = solve_BY(ρ= 1.00001)
 res_015 = solve_BY(ρ= 1.5)
 res_100 = solve_BY(ρ= 10)
 
-with open('data/res_006.pkl', 'wb') as f:
-    pickle.dump(res_006,f)
-with open('data/res_010.pkl', 'wb') as f:
-    pickle.dump(res_010,f)
-with open('data/res_015.pkl', 'wb') as f:
-    pickle.dump(res_015,f)
-with open('data/res_100.pkl', 'wb') as f:
-    pickle.dump(res_100,f)
-
 def solve_BY_elas(γ=10, β=.998, ρ=2./3, μ=0.0015, ϕ_c=0.0078):
 
     σ_original = 0.0078
