@@ -16,10 +16,10 @@ This Python script provides functions to solve for the discrete-time dynamic mac
 These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Updated on Dec. 18, 2022, 4.32 P.M. CT
+Updated on Dec. 20, 2022, 2.25 P.M. PT
 """
 
-def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list, adj_loc_list, tol = 1e-8, max_iter = 50):
+def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list, adj_loc_list, util_adj = False, tol = 1e-8, max_iter = 50):
 
     ## Dimensions, derivatives, and parameters
     n_Y, n_Z, n_W = var_shape
@@ -85,7 +85,7 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
         else:
             scale1 = lq_sum([approx[2] for approx in scale_fun]) + lq_sum([X1_tp1[i-1]-X1_t[i-1] for i in adj_loc_list])
             scale2 = lq_sum([approx[3] for approx in scale_fun]) + lq_sum([X2_tp1[i-1]-X2_t[i-1] for i in adj_loc_list])
-        util_sol = solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, sum([approx[1] for approx in scale_fun]), scale1, scale2)
+        util_sol = solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, sum([approx[1] for approx in scale_fun]), scale1, scale2, X1_t, X2_t, adj_loc_list, util_adj)
         log_N = util_sol['log_N_tilde']
         N_cm = N_tilde_measure(log_N, var_shape)
         
@@ -351,7 +351,7 @@ def approximate_fun(fun, ss, var_shape, X1_t, X2_t, Z1_tp1, Z2_tp1, args):
 
     return fun_approx, fun_zero_order, fun_first_order, fun_second_order
     
-def solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, c_scale0, c_scale1, c_scale2, tol = 1e-10):
+def solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, c_scale0, c_scale1, c_scale2, X1_t, X2_t, c_adj_loc_list, util_adj = False, tol = 1e-10):
 
     n_Y, n_Z, n_W = var_shape
 
@@ -393,9 +393,18 @@ def solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, c_scale0, c_scale1,
     rmc2_t = E(next_period(vmc2_t, Z1_tp1, Z2_tp1) + c_scale2, Ew0,Eww0)
     vmc2_tp1 = next_period(vmc2_t, Z1_tp1, Z2_tp1)
     log_N_tilde = (1-γ)*(vmc1_tp1+c_scale1 + 0.5*(vmc2_tp1+c_scale2))-log_E_exp((1-γ)*(vmc1_tp1+c_scale1 + 0.5*(vmc2_tp1+c_scale2)))
-    
-    vmc_t = LinQuadVar({'c':np.array([[ss[0]]])},(1,n_Z,n_W)) + vmc1_t + 0.5 * vmc2_t
-    rmc_t = LinQuadVar({'c':np.array([[ss[1]]])},(1,n_Z,n_W)) + rmc1_t + 0.5 * rmc2_t
+    vmc0_t = LinQuadVar({'c':np.array([[ss[0]]])},(1,n_Z,n_W))
+    rmc0_t = LinQuadVar({'c':np.array([[ss[1]]])},(1,n_Z,n_W))
+    if util_adj == True:
+        vmc0_t = LinQuadVar({'c':np.array([[ss[0]+sum(ss[2+i-1] for i in c_adj_loc_list)]])},(1,n_Z,n_W))
+        rmc0_t = LinQuadVar({'c':np.array([[ss[1]+sum(ss[2+i-1] for i in c_adj_loc_list)]])},(1,n_Z,n_W))
+        vmc1_t += lq_sum([X1_t[i-1] for i in c_adj_loc_list])
+        vmc2_t += lq_sum([X2_t[i-1] for i in c_adj_loc_list])
+        rmc1_t += lq_sum([X1_t[i-1] for i in c_adj_loc_list])
+        rmc2_t += lq_sum([X2_t[i-1] for i in c_adj_loc_list])
+        print(vmc1_t.coeffs)
+    vmc_t = vmc0_t + vmc1_t + 0.5 * vmc2_t
+    rmc_t = rmc0_t + rmc1_t + 0.5 * rmc2_t
 
     util_sol = {'vmc1_t':vmc1_t,'vmc2_t':vmc2_t,'rmc1_t':rmc1_t,'rmc2_t':rmc2_t,'vmc_t':vmc_t,'rmc_t':rmc_t,\
                 'log_N0':log_N0,'log_N_tilde':log_N_tilde,'c_scale1':c_scale1,'c_scale2':c_scale2}
