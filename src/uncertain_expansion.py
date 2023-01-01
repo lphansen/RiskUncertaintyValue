@@ -16,10 +16,10 @@ This Python script provides functions to solve for the discrete-time dynamic mac
 These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Updated on Dec. 20, 2022, 2.25 P.M. PT
+Updated on Dec. 31, 2022, 9:34 P.M. CT
 """
 
-def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list, adj_loc_list, util_adj = False, tol = 1e-8, max_iter = 50):
+def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list, adj_loc_list, endo_loc_list, init_N = '1', util_adj = False, tol = 1e-8, max_iter = 50):
 
     ## Dimensions, derivatives, and parameters
     n_Y, n_Z, n_W = var_shape
@@ -28,6 +28,7 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
     β = args[1]
     ρ = args[2]
     df, ss = take_derivatives(eq, ss, var_shape, True, args)
+    df_state = state_derivatives(df, (n_Y, n_Z, n_W), endo_loc_list)
 
     ## Zeroth order expansion
     Z0_t = LinQuadVar({'c': ss[n_Y+2:].reshape(-1, 1)}, (n_Z, n_Z, n_W), False)
@@ -36,31 +37,16 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
     Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
     Z2_t = LinQuadVar({'x2': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
 
-    # Expansion results under N = 1
-    no_N_res = No_N_expansion(df, ss, var_shape, γ)
-    Z1_tp1 = no_N_res['Z1_tp1']
-    Z2_tp1 = no_N_res['Z2_tp1']
-
-    # Initialize continuation value and change of measure
-    N0_res = N_0_expansion(df, ss, var_shape, γ)
-    util_sol = {'vmc1_t':no_N_res['vmc1_t'],\
-                'rmc1_t':no_N_res['rmc1_t'],\
-                'vmc2_t':N0_res['vmc2_t'],\
-                'rmc2_t':N0_res['rmc2_t']}
-
-    scale_fun = [approximate_fun(fun_approx, ss, (1, n_Z, n_W), N0_res['X1_t'], N0_res['X2_t'], Z1_tp1, Z2_tp1, args) for fun_approx in scale_fun_list0]
-    if len(adj_loc_list) == 0:
-        scale1 = lq_sum([approx[2] for approx in scale_fun])
-        scale2 = lq_sum([approx[3] for approx in scale_fun])
-    else:
-        scale1 = lq_sum([approx[2] for approx in scale_fun]) + lq_sum([no_N_res['X1_tp1'][i+2-1]-no_N_res['X1_t'][i+2-1] for i in adj_loc_list])
-        scale2 = lq_sum([approx[3] for approx in scale_fun]) + lq_sum([next_period(N0_res['X2_t'][i+2-1], Z1_tp1, Z2_tp1) - N0_res['X2_t'][i+2-1]  for i in adj_loc_list])
-
-    log_N = form_log_N(γ, next_period(util_sol['vmc1_t'], Z1_tp1), next_period(util_sol['vmc2_t'],Z1_tp1,Z2_tp1), scale1, scale2)
-    N_cm = N_tilde_measure(log_N,var_shape)
-
+    if init_N == '1':
+        Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res = initial(df, ss, var_shape, No_N_expansion, args, scale_fun_list)
+    elif init_N == 'N0':
+        Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res = initial(df, ss, var_shape, N_0_expansion, args, scale_fun_list)
+        
     H_tilde_0_series = [N_cm['H_tilde_0']]
     H_tilde_1_series = [N_cm['H_tilde_1']]
+    Λ_tilde_inv_series = [N_cm['Λ_tilde_inv']]
+    Y1_t_series = [Y1_t(*(np.ones([n_Z,1]),np.ones([n_Z,1]),np.ones([n_Z,1])))]
+    Y2_t_series = [Y2_t(*(np.ones([n_Z,1]),np.ones([n_Z,1]),np.ones([n_Z,1])))]
     error_series = []
 
     i = 0
@@ -69,15 +55,19 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
     while error > tol and i < max_iter:
         ## Step 1: Update State Evolution Equation
         Z1_tp1_tilde, Z2_tp1_tilde, ψ_tilde_x, ψ_tilde_w, ψ_tilde_q, ψ_x2, ψ_tilde_xx, ψ_tilde_xw, ψ_tilde_xq, ψ_tilde_ww, ψ_tilde_wq, ψ_tilde_qq,\
-            = update_state_evolution(no_N_res, N_cm, var_shape)
+            = update_state_evolution(Z1_tp1, Z2_tp1, N_cm, var_shape)
 
         ## Step 2: Update Jump Variables
         Y1_t, X1_t, X1_tp1_tilde, schur_first, D, C_mix = solve_jump_first(df, util_sol, Z1_tp1_tilde, N_cm, var_shape)
         Y2_t, X2_t, X2_tp1_tilde, schur_second, D2, D_tilde, G = solve_jump_second(df, util_sol, Z1_tp1_tilde, Z2_tp1_tilde, X1_t, X1_tp1_tilde, N_cm, var_shape)
-        
+        Z1_tp1, Z2_tp1 = update_state_evolution_org(df_state, var_shape, X1_t, X2_t, endo_loc_list)
+
         ## Step 3: Update Continuation Values and Change of measure
         X1_tp1 = next_period(X1_t, Z1_tp1)
         X2_tp1 = next_period(X2_t, Z1_tp1, Z2_tp1)
+        args = list(args)
+        args[-1] = True
+        args = tuple(args)
         scale_fun = [approximate_fun(fun_approx, ss[2:], (1, n_Z, n_W), X1_t, X2_t, Z1_tp1, Z2_tp1, args) for fun_approx in scale_fun_list]
         if len(adj_loc_list) == 0:
             scale1 = lq_sum([approx[2] for approx in scale_fun])
@@ -92,9 +82,15 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
         ## Check convergence
         H_tilde_0_series.append(N_cm['H_tilde_0'])
         H_tilde_1_series.append(N_cm['H_tilde_1'])
+        Λ_tilde_inv_series.append(N_cm['Λ_tilde_inv'])
+        Y1_t_series.append(Y1_t(*(np.ones([n_Z,1]),np.ones([n_Z,1]),np.ones([n_Z,1]))))
+        Y2_t_series.append(Y2_t(*(np.ones([n_Z,1]),np.ones([n_Z,1]),np.ones([n_Z,1]))))
         error_1 = np.max(np.abs(H_tilde_0_series[i+1] - H_tilde_0_series[i]))
         error_2 = np.max(np.abs(H_tilde_1_series[i+1] - H_tilde_1_series[i]))
-        error = np.max([error_1, error_2])
+        error_3 = np.max(np.abs(Λ_tilde_inv_series[i+1] - Λ_tilde_inv_series[i]))
+        error_4 = np.max(np.abs(Y1_t_series[i+1] - Y1_t_series[i])) 
+        error_5 = np.max(np.abs(Y2_t_series[i+1] - Y2_t_series[i])) 
+        error = np.max([error_1, error_2, error_3, error_4, error_5])
         # print(error)
         error_series.append(error)
         
@@ -107,32 +103,125 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list0, scale_fun_list
                         'Z0_t':Z0_t, 'Z1_t':Z1_t, 'Z2_t':Z2_t, 'Z1_tp1': Z1_tp1, 'Z2_tp1': Z2_tp1,
                         'Y0_t':Y0_t, 'Y1_t':Y1_t, 'Y2_t':Y2_t,
                         'X0_t':X0_t, 'X1_t':X1_t, 'X2_t':X2_t, 'X1_tp1': X1_tp1, 'X2_tp1': X2_tp1, 'X_t': X_t, 'X_tp1': X_tp1,
-                        'scale_tp1': scale_fun,
-                        'no_N_res':no_N_res, 'N0_res':N0_res,
+                        'scale_tp1': scale_fun, 'init_N_res': init_N_res,
                         'util_sol':util_sol, 'log_N': log_N, 'N_cm':N_cm,
                         'var_shape': var_shape, 'args':args,
                         'ss': ss[2:], 'ss_vmc': ss[0], 'ss_rmc': ss[1],
                         'second_order': True})
-    
-def extract_ψ(no_N_res):
 
-    ψ_x  = no_N_res['Z1_tp1']['x']
-    ψ_w  = no_N_res['Z1_tp1']['w']
-    ψ_q  = no_N_res['Z1_tp1']['c']
-    ψ_x2 = no_N_res['Z2_tp1']['x2']
-    ψ_xx = no_N_res['Z2_tp1']['xx']
-    ψ_xw = no_N_res['Z2_tp1']['xw']
-    ψ_xq = no_N_res['Z2_tp1']['x']
-    ψ_ww = no_N_res['Z2_tp1']['ww']
-    ψ_wq = no_N_res['Z2_tp1']['w']
-    ψ_qq = no_N_res['Z2_tp1']['c']
+def initial(df, ss, var_shape, init_expansion, args, scale_fun_list):
 
-    return ψ_x, ψ_w, ψ_q, ψ_x2, ψ_xx, ψ_xw, ψ_xq, ψ_ww, ψ_wq, ψ_qq
+    n_Y, n_Z, n_W = var_shape
+    γ = args[0]
+    init_N_res = init_expansion(df, ss, var_shape, γ)
+    Z1_tp1 = init_N_res['Z1_tp1']
+    Z2_tp1 = init_N_res['Z2_tp1']
+    Y1_t = concat(init_N_res['X1_t'].split()[2:-n_Z])
+    Y2_t = concat(init_N_res['X2_t'].split()[2:-n_Z])
+    util_sol = {'vmc1_t':init_N_res['vmc1_t'],\
+                'rmc1_t':init_N_res['rmc1_t'],\
+                'vmc2_t':init_N_res['vmc2_t'],\
+                'rmc2_t':init_N_res['rmc2_t']}
+    args = list(args)
+    args[-1] = False
+    args = tuple(args)
+    scale_fun = [approximate_fun(fun_approx, ss, (1, n_Z, n_W), init_N_res['X1_t'], init_N_res['X2_t'], Z1_tp1, Z2_tp1, args) for fun_approx in scale_fun_list]
+    scale1 = lq_sum([approx[2] for approx in scale_fun])
+    scale2 = lq_sum([approx[3] for approx in scale_fun])
+    log_N = form_log_N(γ, next_period(util_sol['vmc1_t'], Z1_tp1), next_period(util_sol['vmc2_t'],Z1_tp1,Z2_tp1), scale1, scale2)
+    N_cm = N_tilde_measure(log_N,var_shape)
 
-def update_state_evolution(no_N_res, N_cm, var_shape):
+    return Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res
+
+def state_derivatives(df, var_shape, endo_loc_list):
+
+    df = df.copy()
+    n_Y, n_Z, n_W = var_shape
+    n_X = n_Y + n_Z
+    n_endo = len(endo_loc_list)
+    if n_endo == 0:
+        x_index = np.repeat(False,n_Y+2)
+        df_s = {
+            'xt':df['xt'][-n_Z:,-n_Z:],
+            'xtp1':df['xtp1'][-n_Z:,-n_Z:],
+            'wtp1':df['wtp1'][-n_Z:,:],
+            'q':df['q'][-n_Z:],
+            'xtxt':df['xtxt'][-n_Z:,-n_Z*(n_X+2):][:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtxtp1':df['xtxtp1'][-n_Z:,-n_Z*(n_X+2):][:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtwtp1':df['xtwtp1'][-n_Z:,-n_Z*n_W:],
+            'xtq':df['xtq'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'xtp1xtp1':df['xtp1xtp1'][-n_Z:,-n_Z*(n_X+2):][:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtp1wtp1':df['xtp1wtp1'][-n_Z:,-n_Z*n_W:],
+            'xtp1q':df['xtp1q'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'wtp1wtp1':df['wtp1wtp1'][-n_Z:,:],
+            'wtp1q':df['wtp1q'][-n_Z:,:],
+            'qq':df['qq'][-n_Z:,:]
+        }
+    elif n_endo == 1:
+        x_index = np.repeat(False,n_Y+2)
+        x_index[endo_loc_list[0]+1] = True
+        df_s = {
+            'xt':np.concatenate((df['xt'][-n_Z:,[i+1 for i in endo_loc_list]],df['xt'][-n_Z:,-n_Z:]),axis = 1),
+            'xtp1':np.concatenate((df['xtp1'][-n_Z:,[i+1 for i in endo_loc_list]],df['xtp1'][-n_Z:,-n_Z:]),axis = 1),
+            'wtp1':df['wtp1'][-n_Z:,:],
+            'q':df['q'][-n_Z:],
+            'xtxt':np.concatenate((df['xtxt'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],df['xtxt'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtxtp1':np.concatenate((df['xtxtp1'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],df['xtxtp1'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtwtp1':np.concatenate((df['xtwtp1'][-n_Z:,(endo_loc_list[0]+1)*n_W:(endo_loc_list[0]+2)*n_W],df['xtwtp1'][-n_Z:,-n_Z*n_W:]),axis = 1),
+            'xtq':df['xtq'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'xtp1xtp1':np.concatenate((df['xtp1xtp1'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],df['xtp1xtp1'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtp1wtp1':np.concatenate((df['xtp1wtp1'][-n_Z:,(endo_loc_list[0]+1)*n_W:(endo_loc_list[0]+2)*n_W],df['xtp1wtp1'][-n_Z:,-n_Z*n_W:]),axis = 1),
+            'xtp1q':df['xtp1q'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'wtp1wtp1':df['wtp1wtp1'][-n_Z:,:],
+            'wtp1q':df['wtp1q'][-n_Z:,:],
+            'qq':df['qq'][-n_Z:,:]
+        }
+    elif n_endo == 2:
+        x_index = np.repeat(False,n_Y+2)
+        x_index[endo_loc_list[0]+1] = True
+        x_index[endo_loc_list[1]+1] = True
+        df_s = {
+            'xt':np.concatenate((df['xt'][-n_Z:,[i+1 for i in endo_loc_list]],df['xt'][-n_Z:,-n_Z:]),axis = 1),
+            'xtp1':np.concatenate((df['xtp1'][-n_Z:,[i+1 for i in endo_loc_list]],df['xtp1'][-n_Z:,-n_Z:]),axis = 1),
+            'wtp1':df['wtp1'][-n_Z:,:],
+            'q':df['q'][-n_Z:],
+            'xtxt':np.concatenate((df['xtxt'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],\
+                                df['xtxt'][-n_Z:,(endo_loc_list[1]+1)*(n_X+2):(endo_loc_list[1]+2)*(n_X+2)],\
+                                df['xtxt'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtxtp1':np.concatenate((df['xtxtp1'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],\
+                                    df['xtxtp1'][-n_Z:,(endo_loc_list[1]+1)*(n_X+2):(endo_loc_list[1]+2)*(n_X+2)],\
+                                    df['xtxtp1'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtwtp1':np.concatenate((df['xtwtp1'][-n_Z:,(endo_loc_list[0]+1)*n_W:(endo_loc_list[0]+2)*n_W],\
+                                    df['xtwtp1'][-n_Z:,(endo_loc_list[1]+1)*n_W:(endo_loc_list[1]+2)*n_W],\
+                                    df['xtwtp1'][-n_Z:,-n_Z*n_W:]),axis = 1),
+            'xtq':df['xtq'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'xtp1xtp1':np.concatenate((df['xtp1xtp1'][-n_Z:,(endo_loc_list[0]+1)*(n_X+2):(endo_loc_list[0]+2)*(n_X+2)],\
+                                    df['xtp1xtp1'][-n_Z:,(endo_loc_list[1]+1)*(n_X+2):(endo_loc_list[1]+2)*(n_X+2)],\
+                                    df['xtp1xtp1'][-n_Z:,-n_Z*(n_X+2):]),axis = 1)[:,np.tile(np.concatenate([x_index,np.repeat(True,n_Z)]),n_Z+n_endo)],
+            'xtp1wtp1':np.concatenate((df['xtp1wtp1'][-n_Z:,(endo_loc_list[0]+1)*n_W:(endo_loc_list[0]+2)*n_W],\
+                                    df['xtp1wtp1'][-n_Z:,(endo_loc_list[1]+1)*n_W:(endo_loc_list[1]+2)*n_W],\
+                                    df['xtp1wtp1'][-n_Z:,-n_Z*n_W:]),axis = 1),
+            'xtp1q':df['xtp1q'][-n_Z:,:][:,np.concatenate((x_index,np.repeat(True,n_Z)))],
+            'wtp1wtp1':df['wtp1wtp1'][-n_Z:,:],
+            'wtp1q':df['wtp1q'][-n_Z:,:],
+            'qq':df['qq'][-n_Z:,:]
+        }
+    return df_s
+
+def update_state_evolution(Z1_tp1, Z2_tp1, N_cm, var_shape):
     
     n_Y, n_Z, n_W = var_shape
-    ψ_x, ψ_w, ψ_q, ψ_x2, ψ_xx, ψ_xw, ψ_xq, ψ_ww, ψ_wq, ψ_qq = extract_ψ(no_N_res)
+
+    ψ_x  = Z1_tp1['x']
+    ψ_w  = Z1_tp1['w']
+    ψ_q  = Z1_tp1['c']
+    ψ_x2 = Z2_tp1['x2']
+    ψ_xx = Z2_tp1['xx']
+    ψ_xw = Z2_tp1['xw']
+    ψ_xq = Z2_tp1['x']
+    ψ_ww = Z2_tp1['ww']
+    ψ_wq = Z2_tp1['w']
+    ψ_qq = Z2_tp1['c']
 
     ψ_tilde_x = ψ_x + ψ_w@N_cm['H_tilde_1']
     ψ_tilde_w = ψ_w@N_cm['Γ'] 
@@ -169,7 +258,25 @@ def solve_jump_first(df, util_sol, Z1_tp1, change_of_measure, var_shape):
     for nonzero_loc in nonzero_vr_index:
         adj[nonzero_loc[0],0] += df['xt'][nonzero_loc[0]+2,1]*util_sol['rmc1_t']['c']
 
-    D = -np.linalg.inv(df_p['xt']+df_mix+df_p['xtp1'])@(df_p['wtp1']@change_of_measure['H_tilde_0']+adj)
+    LHS = df_p['xt']+df_mix+df_p['xtp1']
+    RHS = -(df_p['wtp1']@change_of_measure['H_tilde_0']+adj)
+    ### The following steps are special for the permanent income model
+    if np.linalg.matrix_rank(LHS) == len(LHS):
+        D = np.linalg.solve(LHS, RHS)
+    else:
+        new_column = np.zeros((LHS.shape[0],1))
+        new_column[3,0] = 1
+        new_row = np.zeros((1, LHS.shape[1]+1))
+        new_row[0,n_Y+1] = 1
+        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
+        RHS = np.vstack((RHS, np.zeros(1)))
+        
+        D = np.linalg.solve(LHS, RHS)
+        discount_adj_1 = np.float(D[-1])
+        D = D[:-1]
+    ### Permanent income model special treatment ends here
+
+    # D = -np.linalg.inv(df_p['xt']+df_mix+df_p['xtp1'])@(df_p['wtp1']@change_of_measure['H_tilde_0']+adj)
     D2 = D[n_Y:]
     D1 = D[:n_Y]
     C_mix = D1-schur_mix['N']@D2
@@ -209,6 +316,38 @@ def solve_jump_second(df, util_sol, Z1_tp1, Z2_tp1, X1_t, X1_tp1, change_of_meas
     X2_tp1 = next_period(X2_t, Z1_tp1, Z2_tp1)
 
     return Y2_t, X2_t, X2_tp1, schur, D2, D_tilde, G
+
+def update_state_evolution_org(df_state, var_shape, X1_t, X2_t, endo_loc_list):
+
+    n_Y, n_Z, n_W = var_shape
+    endo_loc_list = [i-1 for i in endo_loc_list]
+
+    Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
+    if len(endo_loc_list) == 0:
+        state_df1 = df_state.copy()
+        state_df2 = df_state.copy()
+    elif len(endo_loc_list) == 1 or len(endo_loc_list) == 2:
+        state_df1 = plug_in_state_first_order(df_state, (0, n_Z, n_W), X1_t, endo_loc_list)
+        state_df2 = plug_in_state_second_order(df_state, (0, n_Z, n_W), X1_t, X2_t, endo_loc_list)
+    elif len(endo_loc_list) > 2:
+        print('Only two endogenous variables allowed in state evolution equtions in current version of codes.')
+    ψ_x = np.linalg.solve(-state_df1['xtp1'], state_df1['xt'])
+    ψ_w = np.linalg.solve(-state_df1['xtp1'], state_df1['wtp1'])
+    ψ_q = np.linalg.solve(-state_df1['xtp1'], state_df1['q'].reshape(n_Z,1))
+    Z1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q},(n_Z, n_Z, n_W), False)
+    
+    Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_Z, n_W), False)
+    D2 = combine_second_order_terms(state_df2, Z1_t, Z1_tp1, Wtp1)
+    ψ_x2 = np.linalg.solve(-state_df2['xtp1'], state_df2['xt'])
+    ψ_xq = np.linalg.solve(-state_df2['xtp1'], D2['x'])
+    ψ_wq = np.linalg.solve(-state_df2['xtp1'], D2['w'])
+    ψ_qq = np.linalg.solve(-state_df2['xtp1'], D2['c'])
+    ψ_xx = np.linalg.solve(-state_df2['xtp1'], D2['xx'])
+    ψ_xw = np.linalg.solve(-state_df2['xtp1'], D2['xw'])
+    ψ_ww = np.linalg.solve(-state_df2['xtp1'], D2['ww'])
+    Z2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_xx, 'xw': ψ_xw, 'ww': ψ_ww, 'x': ψ_xq, 'w': ψ_wq, 'c': ψ_qq}, (n_Z, n_Z, n_W), False)
+
+    return Z1_tp1, Z2_tp1
 
 def take_derivatives(f, ss, var_shape, second_order,
                       args):
@@ -402,7 +541,6 @@ def solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, c_scale0, c_scale1,
         vmc2_t += lq_sum([X2_t[i-1] for i in c_adj_loc_list])
         rmc1_t += lq_sum([X1_t[i-1] for i in c_adj_loc_list])
         rmc2_t += lq_sum([X2_t[i-1] for i in c_adj_loc_list])
-        print(vmc1_t.coeffs)
     vmc_t = vmc0_t + vmc1_t + 0.5 * vmc2_t
     rmc_t = rmc0_t + rmc1_t + 0.5 * rmc2_t
 
@@ -516,7 +654,22 @@ def No_N_expansion(df, ss, var_shape, γ):
     adj[0, 0] = 0.5 * (1 - γ)*σ_v.dot(σ_v)
     RHS = - np.block([[adj],[np.zeros((n_Z, 1))]])
     LHS = df['xtp1'] + df['xt']
-    D = np.linalg.solve(LHS, RHS)
+    # D = np.linalg.solve(LHS, RHS)
+    ### The following steps are special for the permanent income model
+    if np.linalg.matrix_rank(LHS) == len(LHS):
+        D = np.linalg.solve(LHS, RHS)
+    else:
+        new_column = np.zeros((LHS.shape[0],1))
+        new_column[3,0] = 1
+        new_row = np.zeros((1, LHS.shape[1]+1))
+        new_row[0,n_Y+1] = 1
+        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
+        RHS = np.vstack((RHS, np.zeros(1)))
+        
+        D = np.linalg.solve(LHS, RHS)
+        discount_adj_1 = np.float(D[-1])
+        D = D[:-1]
+    ### Permanent income model special treatment ends here
     C = D[:n_Y] - schur['N']@D[n_Y:]
     ψ_q = D[n_Y:] - ψ_x@D[n_Y:]
 
@@ -649,7 +802,22 @@ def N_0_expansion(df, ss, var_shape, γ):
     RHS = - np.block([[(f_1_xtp1@schur['N_block']@ψ_w + f_1_wtp1)@μ_0+adj],
                       [np.zeros((n_Z, 1))]])
     LHS = df['xtp1'] + df['xt']
-    D = np.linalg.solve(LHS, RHS)
+    # D = np.linalg.solve(LHS, RHS)
+    ### The following steps are special for the permanent income model
+    if np.linalg.matrix_rank(LHS) == len(LHS):
+        D = np.linalg.solve(LHS, RHS)
+    else:
+        new_column = np.zeros((LHS.shape[0],1))
+        new_column[3,0] = 1
+        new_row = np.zeros((1, LHS.shape[1]+1))
+        new_row[0,n_Y+1] = 1
+        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
+        RHS = np.vstack((RHS, np.zeros(1)))
+        
+        D = np.linalg.solve(LHS, RHS)
+        discount_adj_1 = np.float(D[-1])
+        D = D[:-1]
+    ### Permanent income model special treatment ends here
     C = D[:n_Y] - schur['N']@D[n_Y:]
     ψ_q = D[n_Y:] - ψ_x@D[n_Y:]
 
@@ -1584,3 +1752,568 @@ def plug_in_df_second_order(df, var_shape, util_sol):
                   'wtp1q':df_wtp1q,\
                   'qq':df_qq}
     return  df_plug_in
+
+
+def plug_in_state_first_order(df, var_shape, X1_t, endo_loc_list):
+    n_Y, n_Z, n_W = var_shape
+    n_X = n_Y + n_Z
+    n_endo = len(endo_loc_list)
+    df_xt       = df['xt'][-n_Z:,-n_Z:].copy()
+    df_xtp1     = df['xtp1'][-n_Z:,-n_Z:].copy()
+    df_wtp1     = df['wtp1'][-n_Z:,:].copy()
+    df_q        = df['q'][-n_Z:].copy()
+
+    ################################################################################################
+    ## 1. df_xt ####################################################################################
+    ################################################################################################
+
+    nonzero_vr_df = df['xt'][-n_Z:,0:n_endo].copy()                    
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # endo1_t to Z1_t
+        df_xt[[nonzero_loc[0]],-n_Z:]  += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['x']
+
+    ################################################################################################
+    ## 2. df_xtp1 ##################################################################################
+    ################################################################################################ 
+
+    nonzero_vr_df = df['xtp1'][-n_Z:,0:n_endo].copy()                   
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # endo1_tp1 to Z1_tp1
+        df_xtp1[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['x']
+
+    df_plug_in = {'xt':df_xt,\
+                'xtp1':df_xtp1,\
+                'wtp1':df_wtp1,\
+                'q':df_q}
+            
+    return df_plug_in
+
+def plug_in_state_second_order(df, var_shape, X1_t, X2_t, endo_loc_list):
+    n_Y, n_Z, n_W = var_shape
+    n_X = n_Y + n_Z
+    n_endo = len(endo_loc_list)
+
+    df_xt       = df['xt'][-n_Z:,-n_Z:].copy()
+    df_xtp1     = df['xtp1'][-n_Z:,-n_Z:].copy()
+    df_wtp1     = df['wtp1'][-n_Z:,:].copy()
+    df_q        = df['q'][-n_Z:].copy()
+
+    df_xtxt     = df['xtxt'][-n_Z:,n_endo*(n_Z+n_endo):][:,np.tile(np.concatenate([np.repeat(False,n_endo),np.repeat(True,n_Z)]),n_Z)].copy()
+    df_xtxtp1   = df['xtxtp1'][-n_Z:,n_endo*(n_Z+n_endo):][:,np.tile(np.concatenate([np.repeat(False,n_endo),np.repeat(True,n_Z)]),n_Z)].copy()
+    df_xtwtp1   = df['xtwtp1'][-n_Z:,n_endo*n_W:].copy()
+    df_xtq      = df['xtq'][-n_Z:,-n_Z:].copy() 
+    df_xtp1xtp1 = df['xtp1xtp1'][-n_Z:,n_endo*(n_Z+n_endo):][:,np.tile(np.concatenate([np.repeat(False,n_endo),np.repeat(True,n_Z)]),n_Z)].copy()
+    df_xtp1wtp1 = df['xtp1wtp1'][-n_Z:,n_endo*n_W:].copy()
+    df_xtp1q    = df['xtp1q'][-n_Z:,-n_Z:].copy() 
+    df_wtp1wtp1 = df['wtp1wtp1'][-n_Z:,:].copy() 
+    df_wtp1q    = df['wtp1q'][-n_Z:,:].copy() 
+    df_qq       = df['qq'][-n_Z:,:].copy() 
+
+    ################################################################################################
+    ## df_xt #######################################################################################
+    ################################################################################################
+    nonzero_vr_df = df['xt'][-n_Z:,0:n_endo].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # endo2_t to Z2_t
+        df_xt[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['x2']
+        # endo2_t
+        new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['xx'].reshape([n_Z,n_Z]).T.reshape([1,-1])
+        new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+        for i in range(n_Z):   
+            # endo2_t to Z1_tZ1_t
+            df_xtxt[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+        # endo2_t to Z1_tq
+        df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['x']/2
+        # endo2_t to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['c']
+
+    ################################################################################################
+    ## df_xtp1 #####################################################################################
+    ################################################################################################    
+    nonzero_vr_df = df['xtp1'][-n_Z:,0:n_endo].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # endo2_tp1 to Z2_tp1
+        df_xtp1[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['x2']
+        # endo2_tp1
+        new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['xx'].reshape([n_Z,n_Z]).T.reshape([1,-1])
+        new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+        for i in range(n_Z):   
+            # vmc_2tp1 to Z1_tp1Z1_tp1
+            df_xtp1xtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+        # vmc_2tp1 to Z1_tp1q
+        df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['x']/2
+        # vmc_2tp1 to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X2_t[endo_loc_list[nonzero_loc[1]]]['c']
+
+    ################################################################################################
+    ## df_xtxtp1 ###################################################################################
+    ################################################################################################
+    # vmc_tp1vmc_t
+    nonzero_vr_df = df['xtxtp1'][-n_Z:,:1].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[0]]['x'])
+        new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+        for i in range(n_Z):
+            # to Z_tp1Z_t
+            df_xtxtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+        # to Z_tq
+        df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']
+        # to Z_tp1q
+        df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']
+        # to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[0]]['c'])*2
+
+    if n_endo == 1:
+        # x_tp1vmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,n_Z+1-n_Z:n_Z+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_t
+            for i in range(n_Z):
+                df_xtxtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+        
+        # vmc_tp1x_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,1*(n_Z+1):][:,np.tile(np.concatenate([np.array([True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_t
+            df_xtxtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+
+    elif n_endo == 2:
+        # rmc_tp1vmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,1:2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_t
+                df_xtxtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])*2
+
+        # vmc_tp1rmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,(n_Z+2):(n_Z+2)+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[0]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_t
+                df_xtxtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])*2
+
+        # rmc_tp1rmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,(n_Z+2)+1:(n_Z+2)+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_t
+                df_xtxtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[1]]['c']*X1_t[endo_loc_list[1]]['c'])*2
+
+        # x_tp1vmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,n_Z+2-n_Z:n_Z+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_t
+            for i in range(n_Z):
+                df_xtxtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+
+        # x_tp1rmc_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,(n_Z+2)*2-n_Z:(n_Z+2)*2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_t
+            for i in range(n_Z):
+                df_xtxtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()
+
+        # vmc_tp1x_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([True,False]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_t
+            df_xtxtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+
+        # rmc_tp1x_t
+        nonzero_vr_df = df['xtxtp1'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([False,True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_t
+            df_xtxtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()
+
+    ################################################################################################
+    ## df_xtxt #####################################################################################
+    ################################################################################################
+
+    # vmc_tvmc_t
+    nonzero_vr_df = df['xtxt'][-n_Z:,:1].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[0]]['x'])
+        new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+        for i in range(n_Z):
+            # to Z_tZ_t
+            df_xtxt[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+        # to Z_tq
+        df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+        # to Z_tq
+        df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+        # to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[0]]['c'])
+
+    if n_endo == 1:
+        # x_tvmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,n_Z+1-n_Z:n_Z+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tZ_t
+            for i in range(n_Z):
+                df_xtxt[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+        
+        # vmc_tx_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,1*(n_Z+1):][:,np.tile(np.concatenate([np.array([True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tx_t
+            df_xtxt[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+    elif n_endo == 2:
+        # rmc_tvmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,1:2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tZ_t
+                df_xtxt[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # vmc_trmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,(n_Z+2):(n_Z+2)+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[0]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tZ_t
+                df_xtxt[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # rmc_trmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,(n_Z+2)+1:(n_Z+2)+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tZ_t
+                df_xtxt[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to Z_tq
+            df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[1]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # x_tvmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,n_Z+2-n_Z:n_Z+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tZ_t
+            for i in range(n_Z):
+                df_xtxt[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+        # x_trmc_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,(n_Z+2)*2-n_Z:(n_Z+2)*2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tZ_t
+            for i in range(n_Z):
+                df_xtxt[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'][0,i]
+            # to xtq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()/2
+
+        # vmc_tx_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([True,False]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tx_t
+            df_xtxt[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+        # rmc_tx_t
+        nonzero_vr_df = df['xtxt'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([False,True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tx_t
+            df_xtxt[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x']
+            # to x_tq
+            df_xtq[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()/2
+
+    ################################################################################################
+    ## df_xtp1xtp1 #################################################################################
+    ################################################################################################
+    ## df_xtp1xtp1
+    # vmc_tp1vmc_tp1
+    nonzero_vr_df = df['xtp1xtp1'][-n_Z:,:1].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[0]]['x'])
+        new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+        for i in range(n_Z):
+            # to Z_tp1Z_tp1
+            df_xtp1xtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+        # to Z_tp1q
+        df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+        # to Z_tp1q
+        df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+        # to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[0]]['c'])
+
+    if n_endo == 1:
+        # x_tp1vmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,n_Z+1-n_Z:n_Z+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_tp1
+            for i in range(n_Z):
+                df_xtp1xtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+        # vmc_tp1x_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,1*(n_Z+1):][:,np.tile(np.concatenate([np.array([True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_tp1
+            df_xtp1xtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+    elif n_endo == 2:
+        # rmc_tp1vmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,1:2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[0]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_tp1
+                df_xtp1xtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # vmc_tp1rmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,(n_Z+2):(n_Z+2)+1].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[0]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_tp1
+                df_xtp1xtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[0]]['c']/2
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[0]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # rmc_tp1rmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,(n_Z+2)+1:(n_Z+2)+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            new_zz_coef = nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * np.kron(X1_t[endo_loc_list[1]]['x'],X1_t[endo_loc_list[1]]['x'])
+            new_zz_coefs = np.split(new_zz_coef,n_Z,axis=1)
+            for i in range(n_Z):   
+                # to Z_tp1Z_tp1
+                df_xtp1xtp1[[nonzero_loc[0]], (i+1)*n_Z-n_Z : (i+1)*n_Z] += new_zz_coefs[i]
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to Z_tp1q
+            df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'] * X1_t[endo_loc_list[1]]['c']/2
+            # to qq
+            df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * (X1_t[endo_loc_list[1]]['c']*X1_t[endo_loc_list[1]]['c'])
+
+        # x_tp1vmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,n_Z+2-n_Z:n_Z+2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_tp1
+            for i in range(n_Z):
+                df_xtp1xtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+        # x_tp1rmc_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,(n_Z+2)*2-n_Z:(n_Z+2)*2].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to x_tp1Z_tp1
+            for i in range(n_Z):
+                df_xtp1xtp1[[nonzero_loc[0]], i*n_Z+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'][0,i]
+            # to xtp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()/2
+
+        # vmc_tp1x_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([True,False]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_tp1
+            df_xtp1xtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x']
+            # to x_tp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()/2
+
+        # rmc_tp1x_tp1
+        nonzero_vr_df = df['xtp1xtp1'][-n_Z:,2*(n_Z+2):][:,np.tile(np.concatenate([np.array([False,True]),np.repeat(False,n_Z)]),n_Z)].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            # to Z_tp1x_tp1
+            df_xtp1xtp1[[nonzero_loc[0]], n_Z*(nonzero_loc[1]+1)-n_Z:n_Z*(nonzero_loc[1]+1)] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x']
+            # to x_tp1q
+            df_xtp1q[[nonzero_loc[0]],nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()/2
+        
+
+    ################################################################################################
+    ## df_xtwtp1 ###################################################################################
+    ################################################################################################
+
+    # vmc_twtp1
+    nonzero_vr_df = df['xtwtp1'][-n_Z:,:n_W].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        for i in range(n_Z):
+            # to Z_twtp1
+            df_xtwtp1[[nonzero_loc[0]], i*n_W+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+        # to wtp1q
+        df_wtp1q[[nonzero_loc[0]],[nonzero_loc[1]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+
+    if n_endo == 2:
+        # rmc_twtp1
+        nonzero_vr_df = df['xtwtp1'][-n_Z:,n_W:2*n_W].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            for i in range(n_Z):
+                # to Z_twtp1
+                df_xtwtp1[[nonzero_loc[0]], i*n_W+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'][0,i]
+            # to wtp1q
+            df_wtp1q[[nonzero_loc[0]],[nonzero_loc[1]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()
+
+    ################################################################################################
+    ## df_xtp1wtp1 #################################################################################
+    ################################################################################################
+
+    # vmc_tp1wtp1
+    nonzero_vr_df = df['xtp1wtp1'][-n_Z:,:n_W].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        for i in range(n_Z):
+            # to Z_tp1wtp1
+            df_xtp1wtp1[[nonzero_loc[0]], i*n_W+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['x'][0,i]
+        # to wtp1q
+        df_wtp1q[[nonzero_loc[0]],[nonzero_loc[1]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[0]]['c'].item()
+
+    if n_endo == 2:
+        # rmc_tp1wtp1
+        nonzero_vr_df = df['xtp1wtp1'][-n_Z:,n_W:2*n_W].copy()
+        nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+        for nonzero_loc in nonzero_vr_index:
+            for i in range(n_Z):
+                # to Z_tp1wtp1
+                df_xtp1wtp1[[nonzero_loc[0]], i*n_W+nonzero_loc[1]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['x'][0,i]
+            # to wtp1q
+            df_wtp1q[[nonzero_loc[0]],[nonzero_loc[1]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[1]]['c'].item()
+        
+    ################################################################################################
+    ## df_xtq ######################################################################################
+    ################################################################################################
+    nonzero_vr_df = df['xtq'][-n_Z:,0:n_endo].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # vmc_tq to Z_tq
+        df_xtq[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['x']
+        # vmc_tq to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['c']
+
+    ################################################################################################
+    ## df_xtp1q ####################################################################################
+    ################################################################################################
+    nonzero_vr_df = df['xtp1q'][-n_Z:,0:n_endo].copy()
+    nonzero_vr_index = np.transpose(np.nonzero(nonzero_vr_df))
+    for nonzero_loc in nonzero_vr_index:
+        # vmc_tp1q to Z_tp1q
+        df_xtp1q[[nonzero_loc[0]],-n_Z:] += nonzero_vr_df[nonzero_loc[0],nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['x']
+        # vmc_tp1q to qq
+        df_qq[[nonzero_loc[0]]] += nonzero_vr_df[nonzero_loc[0], nonzero_loc[1]] * X1_t[endo_loc_list[nonzero_loc[1]]]['c']
+
+    df_plug_in = {'xt':df_xt,\
+                'xtp1':df_xtp1,\
+                'wtp1':df_wtp1,\
+                'q':df_q,\
+                'xtxt':df_xtxt,\
+                'xtxtp1':df_xtxtp1,\
+                'xtwtp1':df_xtwtp1,\
+                'xtq':df_xtq,\
+                'xtp1xtp1':df_xtp1xtp1,\
+                'xtp1wtp1':df_xtp1wtp1,\
+                'xtp1q':df_xtp1q,\
+                'wtp1wtp1':df_wtp1wtp1,\
+                'wtp1q':df_wtp1q,\
+                'qq':df_qq}
+    return df_plug_in
