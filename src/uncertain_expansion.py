@@ -3,11 +3,10 @@ import autograd.numpy as anp
 import scipy as sp
 import seaborn as sns
 from lin_quad import LinQuadVar
-from lin_quad_util import E, cal_E_ww, matmul, concat, simulate, next_period, kron_prod, log_E_exp, lq_sum
+from lin_quad_util import E, cal_E_ww, matmul, concat, simulate, next_period, kron_prod, log_E_exp, lq_sum, kron_comm
 from elasticity import exposure_elasticity, price_elasticity
 from utilities import mat, vec, sym, gschur
 from derivatives import compute_derivatives
-from numba import prange
 from scipy import optimize
 
 
@@ -37,10 +36,7 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list, adj_loc_list, e
     Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
     Z2_t = LinQuadVar({'x2': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
 
-    if init_N == '1':
-        Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res = initial(df, ss, var_shape, No_N_expansion, args, scale_fun_list)
-    elif init_N == 'N0':
-        Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res = initial(df, ss, var_shape, N_0_expansion, args, scale_fun_list)
+    Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res = initial(df, ss, var_shape, init_N, args, scale_fun_list)
         
     H_tilde_0_series = [N_cm['H_tilde_0']]
     H_tilde_1_series = [N_cm['H_tilde_1']]
@@ -91,7 +87,7 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list, adj_loc_list, e
         error_4 = np.max(np.abs(Y1_t_series[i+1] - Y1_t_series[i])) 
         error_5 = np.max(np.abs(Y2_t_series[i+1] - Y2_t_series[i])) 
         error = np.max([error_1, error_2, error_3, error_4, error_5])
-        # print(error)
+        print(error)
         error_series.append(error)
         
         i+=1
@@ -109,29 +105,25 @@ def uncertain_expansion(eq, ss, var_shape, args, scale_fun_list, adj_loc_list, e
                         'ss': ss[2:], 'ss_vmc': ss[0], 'ss_rmc': ss[1],
                         'second_order': True})
 
-def initial(df, ss, var_shape, init_expansion, args, scale_fun_list):
+def take_derivatives(f, ss, var_shape, second_order,
+                      args):
+    """
+    Take first- or second-order derivatives.
 
-    n_Y, n_Z, n_W = var_shape
-    γ = args[0]
-    init_N_res = init_expansion(df, ss, var_shape, γ)
-    Z1_tp1 = init_N_res['Z1_tp1']
-    Z2_tp1 = init_N_res['Z2_tp1']
-    Y1_t = concat(init_N_res['X1_t'].split()[2:-n_Z])
-    Y2_t = concat(init_N_res['X2_t'].split()[2:-n_Z])
-    util_sol = {'vmc1_t':init_N_res['vmc1_t'],\
-                'rmc1_t':init_N_res['rmc1_t'],\
-                'vmc2_t':init_N_res['vmc2_t'],\
-                'rmc2_t':init_N_res['rmc2_t']}
-    args = list(args)
-    args[-1] = False
-    args = tuple(args)
-    scale_fun = [approximate_fun(fun_approx, ss, (1, n_Z, n_W), init_N_res['X1_t'], init_N_res['X2_t'], Z1_tp1, Z2_tp1, args) for fun_approx in scale_fun_list]
-    scale1 = lq_sum([approx[2] for approx in scale_fun])
-    scale2 = lq_sum([approx[3] for approx in scale_fun])
-    log_N = form_log_N(γ, next_period(util_sol['vmc1_t'], Z1_tp1), next_period(util_sol['vmc2_t'],Z1_tp1,Z2_tp1), scale1, scale2)
-    N_cm = N_tilde_measure(log_N,var_shape)
+    """
+    _, _, n_W = var_shape
 
-    return Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res
+    W_0 = np.zeros(n_W)
+    q_0 = 0.
+
+    if callable(ss):
+        ss = ss(*args)
+
+    df = compute_derivatives(f=lambda X_t, X_tp1, W_tp1, q:
+                             anp.atleast_1d(f(X_t, X_tp1, W_tp1, q, *args)),
+                             X=[ss, ss, W_0, q_0],
+                             second_order=second_order)
+    return df, ss
 
 def state_derivatives(df, var_shape, endo_loc_list):
 
@@ -208,6 +200,189 @@ def state_derivatives(df, var_shape, endo_loc_list):
         }
     return df_s
 
+def initial(df, ss, var_shape, init_N, args, scale_fun_list):
+
+    n_Y, n_Z, n_W = var_shape
+    γ = args[0]
+    init_N_res = init_expansion(df, ss, var_shape, γ, init_N)
+    Z1_tp1 = init_N_res['Z1_tp1']
+    Z2_tp1 = init_N_res['Z2_tp1']
+    Y1_t = concat(init_N_res['X1_t'].split()[2:-n_Z])
+    Y2_t = concat(init_N_res['X2_t'].split()[2:-n_Z])
+    util_sol = {'vmc1_t':init_N_res['vmc1_t'],\
+                'rmc1_t':init_N_res['rmc1_t'],\
+                'vmc2_t':init_N_res['vmc2_t'],\
+                'rmc2_t':init_N_res['rmc2_t']}
+    args = list(args)
+    args[-1] = False
+    args = tuple(args)
+    scale_fun = [approximate_fun(fun_approx, ss, (1, n_Z, n_W), init_N_res['X1_t'], init_N_res['X2_t'], Z1_tp1, Z2_tp1, args) for fun_approx in scale_fun_list]
+    scale1 = lq_sum([approx[2] for approx in scale_fun])
+    scale2 = lq_sum([approx[3] for approx in scale_fun])
+    log_N = form_log_N(γ, next_period(util_sol['vmc1_t'], Z1_tp1), next_period(util_sol['vmc2_t'],Z1_tp1,Z2_tp1), scale1, scale2)
+    N_cm = N_tilde_measure(log_N,var_shape)
+
+    return Z1_tp1, Z2_tp1, util_sol, N_cm, Y1_t, Y2_t, init_N_res
+
+def init_expansion(df, ss, var_shape, γ, init_N):
+
+    n_Y, n_Z, n_W = var_shape
+    n_Y = n_Y + 2
+    n_X = n_Y + n_Z
+
+    ################################################################################################################################################################################
+    ## Zeroth order expansion
+    ################################################################################################################################################################################
+
+    Z0_t = LinQuadVar({'c': ss[n_Y:].reshape(-1, 1)}, (n_Z, n_Z, n_W), False)
+    Y0_t = LinQuadVar({'c': ss[:n_Y].reshape(-1, 1)}, (n_Y, n_Z, n_W), False)
+    X0_t = concat([Y0_t, Z0_t])
+
+    ################################################################################################################################################################################
+    ## First order expansion
+    ################################################################################################################################################################################
+
+    ## Step 1: generalized Schur decomposition, solve for the x coefficients on jump variables
+    schur = schur_decomposition(-df['xtp1'], df['xt'],(n_Y, n_Z, n_W))
+
+    ## Step 2: solve for the coefficients on state variables
+    f_1_xtp1 = df['xtp1'][:n_Y]
+    f_1_wtp1 = df['wtp1'][:n_Y]
+    f_2_xtp1 = df['xtp1'][n_Y:]
+    f_2_xt = df['xt'][n_Y:]
+    f_2_wtp1 = df['wtp1'][n_Y:]
+    ψ_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt@schur['N_block'])
+    ψ_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)
+
+    ## Step 3: generalized Schur decomposition, solve for constants on state and jump variables
+    if init_N == '1':
+        σ_v = (df['xtp1'][[0], :]@schur['N_block']@ψ_w + df['wtp1'][[0], :]).T
+        μ_0 = (1 - γ) * σ_v
+        adj = np.zeros((n_Y, 1))
+        σ_v = σ_v.reshape(-1,)
+        adj[0, 0] = 0.5 * (1 - γ)*σ_v.dot(σ_v)
+        RHS = - np.block([[adj],[np.zeros((n_Z, 1))]])
+        LHS = df['xtp1'] + df['xt']
+    elif init_N == 'N0':
+        σ_v = (df['xtp1'][[0], :]@schur['N_block']@ψ_w + df['wtp1'][[0], :]).T
+        μ_0 = (1 - γ) * σ_v
+        adj = np.zeros((n_Y, 1))
+        σ_v = σ_v.reshape(-1,)
+        adj[0, 0] = - 0.5 * (1 - γ)*σ_v.dot(σ_v)
+        RHS = - np.block([[(f_1_xtp1@schur['N_block']@ψ_w + f_1_wtp1)@μ_0+adj],
+                        [np.zeros((n_Z, 1))]])
+        LHS = df['xtp1'] + df['xt']
+    ### The following steps are special for the permanent income model
+    if np.linalg.matrix_rank(LHS) == len(LHS):
+        D = np.linalg.solve(LHS, RHS)
+    else:
+        new_column = np.zeros((LHS.shape[0],1))
+        new_column[3,0] = 1
+        new_row = np.zeros((1, LHS.shape[1]+1))
+        new_row[0,n_Y+1] = 1
+        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
+        RHS = np.vstack((RHS, np.zeros(1)))
+        
+        D = np.linalg.solve(LHS, RHS)
+        discount_adj_1 = np.float(D[-1])
+        D = D[:-1]
+    ### Permanent income model special treatment ends here
+    C = D[:n_Y] - schur['N']@D[n_Y:]
+    ψ_q = D[n_Y:] - ψ_x@D[n_Y:]
+
+    ## Form the LinQuads for first order expansion when N = 1
+    Z1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q}, (n_Z, n_Z, n_W), False)
+    Z1Z1 = kron_prod(Z1_tp1, Z1_tp1)
+    Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
+    Y1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_Y, n_Z, n_W), False)
+    X1_t = concat([Y1_t, Z1_t])
+    X1_tp1 = next_period(X1_t, Z1_tp1)
+
+    log_M = LinQuadVar({'w': μ_0.T, 'c': -0.5 * μ_0.T @ μ_0}, (1, n_Z, n_W), False)
+
+    ################################################################################################################################################################################
+    ## Second order expansion 
+    ################################################################################################################################################################################
+
+    ## Step 1: Collect first order contributions
+    Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_Z, n_W), False)
+    D2 = combine_second_order_terms(df, X1_t, X1_tp1, Wtp1)
+    D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
+    Y2_coeff = -df['xtp1'][n_Y:]@schur['N_block']
+    C_hat = np.linalg.solve(Y2_coeff, D2_coeff[n_Y:])
+    C_hat_coeff = np.split(C_hat, np.cumsum([1, n_Z, n_W, n_Z**2, n_Z*n_W]), axis=1)
+    
+    ## Step 2: Solve the coeffcients on jump variables
+    M_E_w = log_M['w'].T
+    cov_w = np.eye(n_W)
+    M_E_ww = cal_E_ww(M_E_w, cov_w)
+    E_D2 = E(D2, M_E_w, M_E_ww)
+    E_D2_coeff = np.block([[E_D2['c'], E_D2['x'], E_D2['xx']]])
+    M_mat = form_M0(M_E_w, M_E_ww, Z1_tp1, Z1Z1)
+    LHS = np.eye(n_Y*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
+    RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_Y:]))
+    D_tilde_vec = np.linalg.solve(LHS, RHS)
+    D_tilde = mat(D_tilde_vec, (n_Y, 1+n_Z+n_Z**2))
+    G = np.linalg.solve(schur['Z21'], D_tilde)
+    Y2_t = LinQuadVar({'x2': schur['N'],
+                    'xx': G[:, 1+n_Z:1+n_Z+n_Z**2],
+                    'x': G[:, 1:1+n_Z],
+                    'c': G[:, :1]}, (n_Y, n_Z, n_W), False)
+    
+    ## Step 3: Solve the coeffcients on state variables
+    G_block = np.block([[G], [np.zeros((n_Z, 1+n_Z+n_Z**2))]])
+    Gp_hat = np.linalg.solve(Y2_coeff, df['xtp1'][n_Y:]@G_block)
+    G_hat = np.linalg.solve(Y2_coeff, df['xt'][n_Y:]@G_block)
+    c_1, x_1, w_1, xx_1, xw_1, ww_1 = C_hat_coeff
+    c_2, x_2, xx_2 = np.split(G_hat, np.cumsum([1, n_Z]), axis=1)
+    var = LinQuadVar({'c': Gp_hat[:, :1], 'x': Gp_hat[:, 1:1+n_Z],
+                    'xx': Gp_hat[:, 1+n_Z:1+n_Z+n_Z**2]},
+                    (n_Z, n_Z, n_W), False)
+    var_next = next_period(var, Z1_tp1, None, Z1Z1)
+
+    ψ_x2 = ψ_x.copy()
+    ψ_xq = var_next['x'] + x_1 + x_2
+    ψ_wq = var_next['w'] + w_1
+    ψ_qq = var_next['c'] + c_1 + c_2
+    ψ_xx = var_next['xx'] + xx_1 + xx_2
+    ψ_xw = var_next['xw'] + xw_1
+    ψ_ww = var_next['ww'] + ww_1
+
+    ## Form the LinQuads for second order expansion when N = 1
+    Z2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_xx, 'xw': ψ_xw, 'ww': ψ_ww, 'x': ψ_xq, 'w': ψ_wq, 'c': ψ_qq}, (n_Z, n_Z, n_W), False)
+    Z2_t = LinQuadVar({'x2': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
+    X2_t = concat([Y2_t, Z2_t])
+    X2_tp1 = next_period(X2_t, Z1_tp1, Z2_tp1)
+    
+    Y_t = Y0_t + Y1_t + 0.5*Y2_t
+    X_t = X0_t + X1_t + 0.5*X2_t
+    X_tp1 = next_period(X_t, Z1_tp1, Z2_tp1)
+
+    res = ModelSolution({'Y_t':Y_t,
+                         'Y1_t':Y1_t,
+                         'Y2_t':Y2_t,
+                         'X_t': X_t,
+                         'X_tp1': X_tp1,
+                         'X1_t': X1_t,
+                         'X1_tp1': X1_tp1,
+                         'X2_t': X2_t,
+                         'X2_tp1': X2_tp1,
+                         'Z1_t':Z1_t,
+                         'Z2_t':Z2_t,
+                         'Z1_tp1': Z1_tp1,
+                         'Z2_tp1': Z2_tp1,
+                         'vmc0_t':Y0_t[0],
+                         'rmc0_t':Y0_t[1],
+                         'vmc1_t':Y1_t[0],
+                         'rmc1_t':Y1_t[1],
+                         'vmc2_t':Y2_t[0],
+                         'rmc2_t':Y2_t[1],
+                         'log_M':log_M,
+                         'var_shape': var_shape,
+                         'schur_decomposition': schur,
+                         'second_order': True})
+    return res
+    
 def update_state_evolution(Z1_tp1, Z2_tp1, N_cm, var_shape):
     
     n_Y, n_Z, n_W = var_shape
@@ -349,25 +524,6 @@ def update_state_evolution_org(df_state, var_shape, X1_t, X2_t, endo_loc_list):
 
     return Z1_tp1, Z2_tp1
 
-def take_derivatives(f, ss, var_shape, second_order,
-                      args):
-    """
-    Take first- or second-order derivatives.
-
-    """
-    _, _, n_W = var_shape
-
-    W_0 = np.zeros(n_W)
-    q_0 = 0.
-
-    if callable(ss):
-        ss = ss(*args)
-
-    df = compute_derivatives(f=lambda X_t, X_tp1, W_tp1, q:
-                             anp.atleast_1d(f(X_t, X_tp1, W_tp1, q, *args)),
-                             X=[ss, ss, W_0, q_0],
-                             second_order=second_order)
-    return df, ss
 
 def schur_decomposition(df_tp1, df_t, var_shape):
     
@@ -445,14 +601,6 @@ def N_tilde_measure(log_N, var_shape):
     change_of_measure = {'Λ':Λ, 'H_0':H_0, 'H_1':H_1, 'Λ_tilde':Λ_tilde, 'Λ_tilde_inv':Λ_tilde_inv,'H_tilde_0':H_tilde_0,'H_tilde_1':H_tilde_1,'Γ':Γ,'H_tilde_1_aug':H_tilde_1_aug}
     
     return change_of_measure
-
-def kron_comm(AB, nX, nW):
-    if not np.any(AB):
-        return AB
-    kcAB = np.zeros(AB.shape)
-    for i in prange(AB.shape[0]):
-        kcAB[i] = vec(mat(AB[i:i+1, :].T, (nX, nW)).T).T
-    return kcAB
 
 def form_log_N(γ, vmc1_tp1,vmc2_tp1,c_scale1,c_scale2):
     
@@ -549,6 +697,7 @@ def solve_utility(γ, β, ρ, Z1_tp1, Z2_tp1, ss, var_shape, c_scale0, c_scale1,
 
     return util_sol
 
+
 def E_N_tp1(Y, change_of_measure):
     
     n_Y, n_X, n_W = Y.shape
@@ -616,303 +765,6 @@ def solve_pd(γ, β, ρ, util_sol, Z1_tp1, Z2_tp1, gc0, gd0, var_shape, change_o
     
     return pd_sol
 
-def No_N_expansion(df, ss, var_shape, γ):
-
-    n_Y, n_Z, n_W = var_shape
-    n_Y = n_Y + 2
-    n_X = n_Y + n_Z
-
-    ################################################################################################################################################################################
-    ## Zeroth order expansion
-    ################################################################################################################################################################################
-
-    Z0_t = LinQuadVar({'c': ss[n_Y:].reshape(-1, 1)}, (n_Z, n_Z, n_W), False)
-    Y0_t = LinQuadVar({'c': ss[:n_Y].reshape(-1, 1)}, (n_Y, n_Z, n_W), False)
-    X0_t = concat([Y0_t, Z0_t])
-
-    ################################################################################################################################################################################
-    ## First order expansion
-    ################################################################################################################################################################################
-
-    ## Step 1: generalized Schur decomposition, solve for the x coefficients on jump variables
-    schur = schur_decomposition(-df['xtp1'], df['xt'],(n_Y, n_Z, n_W))
-
-    ## Step 2: solve for the coefficients on state variables
-    f_1_xtp1 = df['xtp1'][:n_Y]
-    f_1_wtp1 = df['wtp1'][:n_Y]
-    f_2_xtp1 = df['xtp1'][n_Y:]
-    f_2_xt = df['xt'][n_Y:]
-    f_2_wtp1 = df['wtp1'][n_Y:]
-    ψ_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt@schur['N_block'])
-    ψ_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)
-
-    ## Step 3: generalized Schur decomposition, solve for constants on state and jump variables
-    σ_v = (df['xtp1'][[0], :]@schur['N_block']@ψ_w + df['wtp1'][[0], :]).T
-    μ_0 = (1 - γ) * σ_v
-    adj = np.zeros((n_Y, 1))
-    σ_v = σ_v.reshape(-1,)
-    adj[0, 0] = 0.5 * (1 - γ)*σ_v.dot(σ_v)
-    RHS = - np.block([[adj],[np.zeros((n_Z, 1))]])
-    LHS = df['xtp1'] + df['xt']
-    # D = np.linalg.solve(LHS, RHS)
-    ### The following steps are special for the permanent income model
-    if np.linalg.matrix_rank(LHS) == len(LHS):
-        D = np.linalg.solve(LHS, RHS)
-    else:
-        new_column = np.zeros((LHS.shape[0],1))
-        new_column[3,0] = 1
-        new_row = np.zeros((1, LHS.shape[1]+1))
-        new_row[0,n_Y+1] = 1
-        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
-        RHS = np.vstack((RHS, np.zeros(1)))
-        
-        D = np.linalg.solve(LHS, RHS)
-        discount_adj_1 = np.float(D[-1])
-        D = D[:-1]
-    ### Permanent income model special treatment ends here
-    C = D[:n_Y] - schur['N']@D[n_Y:]
-    ψ_q = D[n_Y:] - ψ_x@D[n_Y:]
-
-    ## Form the LinQuads for first order expansion when N = 1
-    Z1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q}, (n_Z, n_Z, n_W), False)
-    Z1Z1 = kron_prod(Z1_tp1, Z1_tp1)
-    Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
-    Y1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_Y, n_Z, n_W), False)
-    X1_t = concat([Y1_t, Z1_t])
-    X1_tp1 = next_period(X1_t, Z1_tp1)
-
-    ################################################################################################################################################################################
-    ## Second order expansion 
-    ################################################################################################################################################################################
-
-    ## Step 1: Collect first order contributions
-    Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_Z, n_W), False)
-    D2 = combine_second_order_terms(df, X1_t, X1_tp1, Wtp1)
-    D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
-    Y2_coeff = -df['xtp1'][n_Y:]@schur['N_block']
-    C_hat = np.linalg.solve(Y2_coeff, D2_coeff[n_Y:])
-    C_hat_coeff = np.split(C_hat, np.cumsum([1, n_Z, n_W, n_Z**2, n_Z*n_W]), axis=1)
-    
-    ## Step 2: Solve the coeffcients on jump variables
-    M_E_w = np.zeros([n_W,1])
-    cov_w = np.eye(n_W)
-    M_E_ww = cal_E_ww(M_E_w, cov_w)
-    E_D2 = E(D2, M_E_w, M_E_ww)
-    E_D2_coeff = np.block([[E_D2['c'], E_D2['x'], E_D2['xx']]])
-    M_mat = form_M0(M_E_w, M_E_ww, Z1_tp1, Z1Z1)
-    LHS = np.eye(n_Y*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
-    RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_Y:]))
-    D_tilde_vec = np.linalg.solve(LHS, RHS)
-    D_tilde = mat(D_tilde_vec, (n_Y, 1+n_Z+n_Z**2))
-    G = np.linalg.solve(schur['Z21'], D_tilde)
-    Y2_t = LinQuadVar({'x2': schur['N'],
-                    'xx': G[:, 1+n_Z:1+n_Z+n_Z**2],
-                    'x': G[:, 1:1+n_Z],
-                    'c': G[:, :1]}, (n_Y, n_Z, n_W), False)
-    
-    ## Step 3: Solve the coeffcients on state variables
-    G_block = np.block([[G], [np.zeros((n_Z, 1+n_Z+n_Z**2))]])
-    Gp_hat = np.linalg.solve(Y2_coeff, df['xtp1'][n_Y:]@G_block)
-    G_hat = np.linalg.solve(Y2_coeff, df['xt'][n_Y:]@G_block)
-    c_1, x_1, w_1, xx_1, xw_1, ww_1 = C_hat_coeff
-    c_2, x_2, xx_2 = np.split(G_hat, np.cumsum([1, n_Z]), axis=1)
-    var = LinQuadVar({'c': Gp_hat[:, :1], 'x': Gp_hat[:, 1:1+n_Z],
-                    'xx': Gp_hat[:, 1+n_Z:1+n_Z+n_Z**2]},
-                    (n_Z, n_Z, n_W), False)
-    var_next = next_period(var, Z1_tp1, None, Z1Z1)
-
-    ψ_x2 = ψ_x.copy()
-    ψ_xq = var_next['x'] + x_1 + x_2
-    ψ_wq = var_next['w'] + w_1
-    ψ_qq = var_next['c'] + c_1 + c_2
-    ψ_xx = var_next['xx'] + xx_1 + xx_2
-    ψ_xw = var_next['xw'] + xw_1
-    ψ_ww = var_next['ww'] + ww_1
-
-    ## Form the LinQuads for second order expansion when N = 1
-    Z2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_xx, 'xw': ψ_xw, 'ww': ψ_ww, 'x': ψ_xq, 'w': ψ_wq, 'c': ψ_qq}, (n_Z, n_Z, n_W), False)
-    Z2_t = LinQuadVar({'x2': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
-    X2_t = concat([Y2_t, Z2_t])
-    X2_tp1 = next_period(X2_t, Z1_tp1, Z2_tp1)
-    
-    Y_t = Y0_t + Y1_t + 0.5*Y2_t
-    X_t = X0_t + X1_t + 0.5*X2_t
-    X_tp1 = next_period(X_t, Z1_tp1, Z2_tp1)
-
-    res = ModelSolution({'Y_t':Y_t,
-                         'Y1_t':Y1_t,
-                         'Y2_t':Y2_t,
-                         'X_t': X_t,
-                         'X_tp1': X_tp1,
-                         'X1_t': X1_t,
-                         'X1_tp1': X1_tp1,
-                         'X2_t': X2_t,
-                         'X2_tp1': X2_tp1,
-                         'Z1_t':Z1_t,
-                         'Z2_t':Z2_t,
-                         'Z1_tp1': Z1_tp1,
-                         'Z2_tp1': Z2_tp1,
-                         'vmc0_t':Y0_t[0],
-                         'rmc0_t':Y0_t[1],
-                         'vmc1_t':Y1_t[0],
-                         'rmc1_t':Y1_t[1],
-                         'vmc2_t':Y2_t[0],
-                         'rmc2_t':Y2_t[1],
-                         'var_shape': var_shape,
-                         'schur_decomposition': schur,
-                         'second_order': True})
-    return res
-
-def N_0_expansion(df, ss, var_shape, γ):
-
-    n_Y, n_Z, n_W = var_shape
-    n_Y = n_Y + 2
-    n_X = n_Y + n_Z
-
-    ################################################################################################################################################################################
-    ## Zeroth order expansion
-    ################################################################################################################################################################################
-
-    Z0_t = LinQuadVar({'c': ss[n_Y:].reshape(-1, 1)}, (n_Z, n_Z, n_W), False)
-    Y0_t = LinQuadVar({'c': ss[:n_Y].reshape(-1, 1)}, (n_Y, n_Z, n_W), False)
-    X0_t = concat([Y0_t, Z0_t])
-
-    ################################################################################################################################################################################
-    ## First order expansion
-    ################################################################################################################################################################################
-
-    ## Step 1: generalized Schur decomposition, solve for the x coefficients on jump variables
-    schur = schur_decomposition(-df['xtp1'], df['xt'],(n_Y, n_Z, n_W))
-
-    ## Step 2: solve for the coefficients on state variables
-    f_1_xtp1 = df['xtp1'][:n_Y]
-    f_1_wtp1 = df['wtp1'][:n_Y]
-    f_2_xtp1 = df['xtp1'][n_Y:]
-    f_2_xt = df['xt'][n_Y:]
-    f_2_wtp1 = df['wtp1'][n_Y:]
-    ψ_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt@schur['N_block'])
-    ψ_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)
-
-    ## Step 3: generalized Schur decomposition, solve for constants on state and jump variables
-    σ_v = (df['xtp1'][[0], :]@schur['N_block']@ψ_w + df['wtp1'][[0], :]).T
-    μ_0 = (1 - γ) * σ_v
-    adj = np.zeros((n_Y, 1))
-    σ_v = σ_v.reshape(-1,)
-    adj[0, 0] = - 0.5 * (1 - γ)*σ_v.dot(σ_v)
-    RHS = - np.block([[(f_1_xtp1@schur['N_block']@ψ_w + f_1_wtp1)@μ_0+adj],
-                      [np.zeros((n_Z, 1))]])
-    LHS = df['xtp1'] + df['xt']
-    # D = np.linalg.solve(LHS, RHS)
-    ### The following steps are special for the permanent income model
-    if np.linalg.matrix_rank(LHS) == len(LHS):
-        D = np.linalg.solve(LHS, RHS)
-    else:
-        new_column = np.zeros((LHS.shape[0],1))
-        new_column[3,0] = 1
-        new_row = np.zeros((1, LHS.shape[1]+1))
-        new_row[0,n_Y+1] = 1
-        LHS = np.vstack((np.hstack((LHS, new_column)),new_row))
-        RHS = np.vstack((RHS, np.zeros(1)))
-        
-        D = np.linalg.solve(LHS, RHS)
-        discount_adj_1 = np.float(D[-1])
-        D = D[:-1]
-    ### Permanent income model special treatment ends here
-    C = D[:n_Y] - schur['N']@D[n_Y:]
-    ψ_q = D[n_Y:] - ψ_x@D[n_Y:]
-
-    ## Form the LinQuads for first order expansion when N = 1
-    Z1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q}, (n_Z, n_Z, n_W), False)
-    Z1Z1 = kron_prod(Z1_tp1, Z1_tp1)
-    Z1_t = LinQuadVar({'x': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
-    Y1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_Y, n_Z, n_W), False)
-    X1_t = concat([Y1_t, Z1_t])
-    X1_tp1 = next_period(X1_t, Z1_tp1)
-
-    log_M = LinQuadVar({'w': μ_0.T, 'c': -0.5 * μ_0.T @ μ_0}, (1, n_Z, n_W), False)
-
-    ################################################################################################################################################################################
-    ## Second order expansion 
-    ################################################################################################################################################################################
-
-    ## Step 1: Collect first order contributions
-    Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_Z, n_W), False)
-    D2 = combine_second_order_terms(df, X1_t, X1_tp1, Wtp1)
-    D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
-    Y2_coeff = -df['xtp1'][n_Y:]@schur['N_block']
-    C_hat = np.linalg.solve(Y2_coeff, D2_coeff[n_Y:])
-    C_hat_coeff = np.split(C_hat, np.cumsum([1, n_Z, n_W, n_Z**2, n_Z*n_W]), axis=1)
-    
-    ## Step 2: Solve the coeffcients on jump variables
-    M_E_w = log_M['w'].T
-    cov_w = np.eye(n_W)
-    M_E_ww = cal_E_ww(M_E_w, cov_w)
-    E_D2 = E(D2, M_E_w, M_E_ww)
-    E_D2_coeff = np.block([[E_D2['c'], E_D2['x'], E_D2['xx']]])
-    M_mat = form_M0(M_E_w, M_E_ww, Z1_tp1, Z1Z1)
-    LHS = np.eye(n_Y*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
-    RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_Y:]))
-    D_tilde_vec = np.linalg.solve(LHS, RHS)
-    D_tilde = mat(D_tilde_vec, (n_Y, 1+n_Z+n_Z**2))
-    G = np.linalg.solve(schur['Z21'], D_tilde)
-    Y2_t = LinQuadVar({'x2': schur['N'],
-                    'xx': G[:, 1+n_Z:1+n_Z+n_Z**2],
-                    'x': G[:, 1:1+n_Z],
-                    'c': G[:, :1]}, (n_Y, n_Z, n_W), False)
-    
-    ## Step 3: Solve the coeffcients on state variables
-    G_block = np.block([[G], [np.zeros((n_Z, 1+n_Z+n_Z**2))]])
-    Gp_hat = np.linalg.solve(Y2_coeff, df['xtp1'][n_Y:]@G_block)
-    G_hat = np.linalg.solve(Y2_coeff, df['xt'][n_Y:]@G_block)
-    c_1, x_1, w_1, xx_1, xw_1, ww_1 = C_hat_coeff
-    c_2, x_2, xx_2 = np.split(G_hat, np.cumsum([1, n_Z]), axis=1)
-    var = LinQuadVar({'c': Gp_hat[:, :1], 'x': Gp_hat[:, 1:1+n_Z],
-                    'xx': Gp_hat[:, 1+n_Z:1+n_Z+n_Z**2]},
-                    (n_Z, n_Z, n_W), False)
-    var_next = next_period(var, Z1_tp1, None, Z1Z1)
-
-    ψ_x2 = ψ_x.copy()
-    ψ_xq = var_next['x'] + x_1 + x_2
-    ψ_wq = var_next['w'] + w_1
-    ψ_qq = var_next['c'] + c_1 + c_2
-    ψ_xx = var_next['xx'] + xx_1 + xx_2
-    ψ_xw = var_next['xw'] + xw_1
-    ψ_ww = var_next['ww'] + ww_1
-
-    ## Form the LinQuads for second order expansion when N = 1
-    Z2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_xx, 'xw': ψ_xw, 'ww': ψ_ww, 'x': ψ_xq, 'w': ψ_wq, 'c': ψ_qq}, (n_Z, n_Z, n_W), False)
-    Z2_t = LinQuadVar({'x2': np.eye(n_Z)}, (n_Z, n_Z, n_W), False)
-    X2_t = concat([Y2_t, Z2_t])
-    X2_tp1 = next_period(X2_t, Z1_tp1, Z2_tp1)
-    
-    Y_t = Y0_t + Y1_t + 0.5*Y2_t
-    X_t = X0_t + X1_t + 0.5*X2_t
-    X_tp1 = next_period(X_t, Z1_tp1, Z2_tp1)
-
-    res = ModelSolution({'Y_t':Y_t,
-                         'Y1_t':Y1_t,
-                         'Y2_t':Y2_t,
-                         'X_t': X_t,
-                         'X_tp1': X_tp1,
-                         'X1_t': X1_t,
-                         'X1_tp1': X1_tp1,
-                         'X2_t': X2_t,
-                         'X2_tp1': X2_tp1,
-                         'Z1_t':Z1_t,
-                         'Z2_t':Z2_t,
-                         'Z1_tp1': Z1_tp1,
-                         'Z2_tp1': Z2_tp1,
-                         'vmc0_t':Y0_t[0],
-                         'rmc0_t':Y0_t[1],
-                         'vmc1_t':Y1_t[0],
-                         'rmc1_t':Y1_t[1],
-                         'vmc2_t':Y2_t[0],
-                         'rmc2_t':Y2_t[1],
-                         'log_M':log_M,
-                         'var_shape': var_shape,
-                         'schur_decomposition': schur,
-                         'second_order': True})
-    return res
 
 class ModelSolution(dict):
     """
