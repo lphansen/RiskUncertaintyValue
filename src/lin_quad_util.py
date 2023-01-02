@@ -8,6 +8,7 @@ from scipy import optimize
 from utilities import vec, mat, sym, cal_E_ww
 from lin_quad import LinQuadVar
 from numba import njit
+from numba import prange
 from copy import deepcopy
 import time
 
@@ -154,7 +155,7 @@ def kron_prod(Y1, Y2):
 
 def lq_sum(lq_list):
 
-    lq_sum = LinQuadVar({'c':np.zeros([1,1])},lq_list[0].shape)
+    lq_sum = LinQuadVar({'c':np.zeros([lq_list[0].shape[0],1])},lq_list[0].shape)
     for i in range(len(lq_list)):
         lq_sum += lq_list[i]
 
@@ -213,8 +214,6 @@ def concat(Y_list):
 
     return Y_cat
     
-
-# def E(Y, E_w, Cov_w=None):
 def E(Y, E_w, E_ww=None):
     r"""
     Computes :math:`E[Y_{t+1} \mid \mathfrak{F}_t]`,
@@ -245,6 +244,13 @@ def E(Y, E_w, E_ww=None):
         E_Y = LinQuadVar(E_Y, Y.shape, False)
         return E_Y
 
+def kron_comm(AB, nX, nW):
+    if not np.any(AB):
+        return AB
+    kcAB = np.zeros(AB.shape)
+    for i in prange(AB.shape[0]):
+        kcAB[i] = vec(mat(AB[i:i+1, :].T, (nX, nW)).T).T
+    return kcAB
 
 def log_E_exp(Y):
     r"""
