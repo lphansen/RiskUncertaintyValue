@@ -60,12 +60,12 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     var_shape : tuple of ints
         (n_J, n_X, n_W). Number of jump variables, states and
         shocks respectively.
-    args : tuple of floats/ints
+    args : tuple of floats/strings
         Model parameters, the first three elements are fixed recursive 
         utility parameters, γ, β, ρ
         The last item is reserved to `mode`, a string that specifies 
         what the `eq_cond` should return.
-    gc_tp1_fun : callable
+    gc : callable
         Function to approximate the log growth of consumption.
     init_util: dict
         Initialization of $mu^0, Upsilon^2_0, Upsilon^2_1,$ and $Upsilon^2_2$. 
