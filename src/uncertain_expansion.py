@@ -52,7 +52,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     ss : (n_JX, ) ndarray or callable
         Steady states or the function for calculating steady states.
     var_shape : tuple of ints
-        (n_J, n_X, n_W). Number of endogenous variables, states and
+        (n_J, n_X, n_W). Number of jump variables, states and
         shocks respectively.
     args : tuple of floats/ints
         Model parameters, the first three elements are fixed recursive 
@@ -75,7 +75,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     -------
     res : ModelSolution
         The model solution represented as a ModelSolution object. Important
-        attributes are: JX_t the approximated variables as a linear or linear-
+        attributes are: J_t the approximated jump variables as a linear or linear-
         quadratic function of state derivatives; X1_tp1 (and X2_tp1) the laws of
         motion for the first-order (and second-order) derivatives of states. 
 
