@@ -32,7 +32,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     Parameters
     ----------
     eq_cond : callable
-        Returns [Qpsi_1-psi_2, phi_var - phi] Qpsi_1-psi_2 satisfy the 
+        Returns [Q psi_1-psi_2, phi_var - phi] Q psi_1-psi_2 satisfy the 
         forward-looking equations E[N Q psi_1-psi_2]=0, and phi satisfy 
         the state equations  phi_var - phi=0.
 
@@ -41,8 +41,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
         where Var_t and Var_tp1 are variables at time t and t+1 respectively,
         W_tp1 are time t+1 shocks, and q is perturbation parameter.
         Note that in Var_t and Var_tp1, state variables must follow endogenous 
-        variables. 
-        The first one must be q_t or q_tp1.
+        variables. The first one must be q_t or q_tp1.
 
         Under 'psi1' mode, returns psi_1,
 
