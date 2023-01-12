@@ -10,11 +10,14 @@ from derivatives import compute_derivatives
 from lin_quad import LinQuadVar
 
 '''
-This Python script provides functions to solve for the discrete-time dynamic macro-finance models under uncertainty, based on the perturbation method.
-These models feature EZ recursive preferences.
+This Python script provides functions to solve for the discrete-time 
+dynamic macro-finance models under uncertainty, based on the 
+perturbation method. These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Updated on Jan. 11, 2023, 6:34 P.M. CT
+Codes updated on Jan. 11, 2023, 6:34 P.M. CT
+Check and obtain the lastest version on 
+https://github.com/lphansen/RiskUncertaintyValue 
 '''
 
 def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol = 1e-8, max_iter = 50):
