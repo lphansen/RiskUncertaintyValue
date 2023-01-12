@@ -393,7 +393,7 @@ def form_M0(M0_E_w, M0_E_ww, X1_tp1, X1X1):
 
 def approximate_fun(fun, ss, var_shape, JX1_t, JX2_t, X1_tp1, X2_tp1, args, second_order = True, zeroth_order = False):
     """
-    Approximate functions given state and jump varibles
+    Approximates function given state evolutions and jump varibles
 
     """
     _, n_X, n_W = var_shape
