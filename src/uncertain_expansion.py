@@ -81,7 +81,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     -------
     res : ModelSolution
         The model solution represented as a ModelSolution object. Important
-        attributes are: J_t the approximated jump variables as a linear or linear-
+        attributes are: JX_t the approximated variables as a linear or linear-
         quadratic function of state derivatives; X1_tp1 (and X2_tp1) the laws of
         motion for the first-order (and second-order) derivatives of states. 
 
