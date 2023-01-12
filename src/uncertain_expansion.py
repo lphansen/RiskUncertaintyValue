@@ -32,7 +32,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     Parameters
     ----------
     eq_cond : callable
-        Returns [Q psi_1-psi_2, phi_var - phi] Q psi_1-psi_2 satisfy the 
+        Returns [Q psi_1-psi_2, phi_var - phi], Q psi_1-psi_2 satisfy the 
         forward-looking equations E[N Q psi_1-psi_2]=0, and phi satisfy 
         the state equations  phi_var - phi=0.
 
@@ -41,13 +41,15 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
         where Var_t and Var_tp1 are variables at time t and t+1 respectively,
         W_tp1 are time t+1 shocks, and q is perturbation parameter.
         Note that in Var_t and Var_tp1, state variables must follow endogenous 
-        variables. The first one must be q_t or q_tp1.
+        variables. The first one must be q_t or q_tp1. In the equilibrium 
+        conditions, state evolution equations should follow forward-looking 
+        equations.
 
-        Under 'psi1' mode, returns psi_1,
+        Under 'psi1' mode, returns psi_1, 
 
         ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_J, ) ndarray``
 
-        Other modes are optional.
+        'psi1' mode specification is mandatory. Other modes are optional.
 
     ss : (n_JX, ) ndarray or callable
         Steady states or the function for calculating steady states.
@@ -62,7 +64,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     gc_tp1_fun : callable
         Function to approximate the log growth of consumption.
     init_util: dict
-        Initialization of $mu^0, Upsilon_2^0, Upsilon_2^1,$ and $Upsilon_2^2$. 
+        Initialization of $mu^0, Upsilon^2_0, Upsilon^2_1,$ and $Upsilon^2_2$. 
         Users may provide a dictionary that maps the keys `mu_0`, `Upsilon_0`, 
         `Upsilon_1`, `Upsilon_2` to the corresponding matrices for initialization. 
         If None, zero matrices are used.
