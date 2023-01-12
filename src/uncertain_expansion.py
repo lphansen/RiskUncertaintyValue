@@ -34,9 +34,9 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     eq_cond : callable
         Returns [Q psi_1-psi_2, phi_var - phi], Q psi_1-psi_2 satisfy the 
         forward-looking equations E[N Q psi_1-psi_2]=0, and phi satisfy 
-        the state equations  phi_var - phi=0.
+        the state equations phi_var - phi=0
 
-        ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_JX +1, ) ndarray``
+        ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_JX, ) ndarray``
 
         where Var_t and Var_tp1 are variables at time t and t+1 respectively,
         W_tp1 are time t+1 shocks, and q is perturbation parameter.
@@ -50,9 +50,10 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
         ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_J, ) ndarray``
 
         'psi1' mode specification is mandatory. Other modes are optional.
-
-    ss : (n_JX, ) ndarray or callable
+    ss : callable or (n_JX, ) ndarray
         Steady states or the function for calculating steady states.
+        It follows the same order as Var_t and Var_tp1 in equilibrium 
+        conditions.
     var_shape : tuple of ints
         (n_J, n_X, n_W). Number of jump variables, states and
         shocks respectively.
