@@ -215,28 +215,43 @@ class LinQuadVar:
             res.append(Y)
         return res
 
-    def drop_scale(self, loc, loc2 = 100):
-        n_Y, n_Z, n_W = self.shape
+    def drop_scale(self, loc_list):
+        """
+        Drops redundant state varibles in the LinQuadVar
+
+        Returns
+        -------
+        res : LinQuadVar
+
+        """
+        _, n_X, n_W = self.shape
+        
+        loc_list.sort()
+        drop_num = len(loc_list)
+        loc = loc_list[0]
 
         lq_new = LinQuadVar({'c':self['c'],\
                 'w':self['w'],\
                 'x':np.delete(self['x'],loc-1).reshape(1,-1),\
                 'x2':np.delete(self['x2'],loc-1).reshape(1,-1),\
-                'xx':np.delete(np.delete(self['xx'], np.arange(n_Z*(loc-1),n_Z*loc)), np.arange(loc-1,n_Z*(n_Z-1),n_Z)).reshape(1,-1),\
+                'xx':np.delete(np.delete(self['xx'], np.arange(n_X*(loc-1),n_X*loc)), np.arange(loc-1,n_X*(n_X-1),n_X)).reshape(1,-1),\
                 'xw':np.delete(self['xw'],np.arange(n_W*(loc-1),n_W*loc)).reshape(1,-1),\
-                'ww':self['ww']},(1,n_Z-1,n_W))
-        
-        if loc2<100:      
-            n_Z = n_Z - 1             
-            loc = loc2 - 1
+                'ww':self['ww']},(1,n_X-1,n_W))
+
+        if drop_num == 2:      
+            n_X = n_X - 1             
+            loc = loc_list[1] - 1
             lq_new2 = LinQuadVar({'c':lq_new['c'],\
                         'w':lq_new['w'],\
                         'x':np.delete(lq_new['x'],loc-1).reshape(1,-1),\
                         'x2':np.delete(lq_new['x2'],loc-1).reshape(1,-1),\
-                        'xx':np.delete(np.delete(lq_new['xx'], np.arange(n_Z*(loc-1),n_Z*loc)), np.arange(loc-1,n_Z*(n_Z-1),n_Z)).reshape(1,-1),\
+                        'xx':np.delete(np.delete(lq_new['xx'], np.arange(n_X*(loc-1),n_X*loc)), np.arange(loc-1,n_X*(n_X-1),n_X)).reshape(1,-1),\
                         'xw':np.delete(lq_new['xw'],np.arange(n_W*(loc-1),n_W*loc)).reshape(1,-1),\
-                        'ww':lq_new['ww']},(1,n_Z-1,n_W))
+                        'ww':lq_new['ww']},(1,n_X-1,n_W))
             return lq_new2
+            
+        elif drop_num>2:
+            print('Current version of drop_scale only allow two scale varible.')
         else:
             return lq_new
 

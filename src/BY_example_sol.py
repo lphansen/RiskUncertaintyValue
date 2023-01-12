@@ -19,75 +19,86 @@ from lin_quad import LinQuadVar
 from lin_quad_util import next_period
 
 def eq_cond_BY(X_t, X_tp1, W_tp1, q, *args):
+    
     # Parameters for the model
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, plug_in = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
 
     # Variables:
-    vmc_t, rmc_t, pd_t, x_t, σ_t_squared = X_t.ravel()
-    vmc_tp1, rmc_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
+    q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
+    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
     w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
-    
+
     σ_t = anp.sqrt(σ_t_squared)
     gc_tp1 = μ + x_t + ϕ_c*σ_t*w3_tp1
     gd_tp1 = μ_d + ϕ*x_t + π*σ_t*w3_tp1 + ϕ_d*σ_t*w4_tp1
     
-    m = vmc_tp1 + gc_tp1 - rmc_t
+    psi1_1 = anp.exp(anp.log(β)- ρ*gc_tp1 + gd_tp1)*(anp.exp(pd_tp1) + 1)
 
-    util = (1-β) + β*anp.exp((1-ρ)*(rmc_t)) - anp.exp((1-ρ)*(vmc_t))
+    psi2_1 =  anp.exp(pd_t)
+
+    # State process
+    phi_1 = α * x_t + ϕ_e * σ_t * w1_tp1
+    phi_2 = σ_squared + ν_1 * (σ_t_squared - σ_squared) + σ_w * w2_tp1
+
+    phi_1_var = x_tp1
+    phi_2_var = σ_tp1_squared
     
-    res_1 = anp.exp(pd_t) - (anp.exp(anp.log(β) + (ρ-1)*(vmc_tp1+gc_tp1-rmc_t) - ρ*gc_tp1 + gd_tp1)*(anp.exp(pd_tp1) + 1))
-
-    res_2 = x_tp1 - (α * x_t + ϕ_e * σ_t * w1_tp1)
-
-    res_3 = σ_tp1_squared - (σ_squared + ν_1 * (σ_t_squared - σ_squared) + σ_w * w2_tp1)
-
-    return anp.array([m, util, res_1, res_2, res_3])
+    if mode == 'eq_cond':
+        return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1_var - phi_1, phi_2_var - phi_2])
+    elif mode == 'psi1':
+        return np.array([psi1_1])
+    elif mode == 'psi2':
+        return np.array([psi2_1])
+    elif mode == 'phi':
+        return np.array([phi_1, phi_2])
+    raise Exception
 
 def ss_func_BY(*args):
-    # Extra parameters for the model
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, plug_in = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
 
-    vmc = (np.log(1-β) - np.log(1-β*np.exp((1-ρ)*μ)))/(1-ρ)
-    rmc = vmc + μ
     sdf = anp.exp(anp.log(β) - ρ*μ)
-    X_0 = np.array([vmc, rmc, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
+    X_0 = np.array([0, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
     return X_0
 
 def gc_tp1_approx(X_t, X_tp1, W_tp1, q, *args):
     # Parameters for the model
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, plug_in = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
 
     # Variables:
-    if plug_in:
-        pd_t, x_t, σ_t_squared = X_t.ravel()
-        pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
-        w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
-    else:
-        vmc_t, rmc_t, pd_t, x_t, σ_t_squared = X_t.ravel()
-        vmc_tp1, rmc_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
-        w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
+    q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
+    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
+    w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
     σ_t = anp.sqrt(σ_t_squared)
     
     gc_tp1 = μ + x_t + ϕ_c*σ_t*w3_tp1
     
     return gc_tp1
 
-
 def calc_SDF(res):
 
-    gc_tp1 = res['gc_tp1']  
+    n_J, n_X, n_W = res['var_shape']
     β = res['β']
     ρ = res['ρ']
-    n_Y, n_X, n_W = res['var_shape']
-    log_beta = LinQuadVar({'c':np.array([[np.log(β)]])},(1,n_X,n_W))
-    Z1_tp1 = res['Z1_tp1']
-    Z2_tp1 = res['Z2_tp1']
-    vmc_tp1 = next_period(res['vmc_t'], Z1_tp1, Z2_tp1)
-    rmc_t = res['rmc_t']
-    log_N = res['log_N']
-    log_SDF = log_beta +(ρ - 1)*(vmc_tp1 + gc_tp1 - rmc_t) - ρ*gc_tp1 + log_N
 
-    return log_SDF, gc_tp1, Z1_tp1, Z2_tp1
+    X1_tp1 = res['X1_tp1']
+    X2_tp1 = res['X2_tp1']
+
+    gc_tp1 = res['gc_tp1']
+    gc0_tp1 = res['gc0_tp1']
+    gc1_tp1 = res['gc1_tp1']
+    gc2_tp1 = res['gc2_tp1']
+
+    vmr1_tp1 = res['vmr1_tp1']
+    vmr2_tp1 = res['vmr2_tp1']
+    log_N_tilde = res['log_N_tilde']
+
+    S0_tp1 = LinQuadVar({'c':np.log(β)-ρ*np.array([[gc0_tp1]])}, shape = (1,n_X,n_W))
+    S1_tp1 = (ρ-1)*vmr1_tp1 -ρ*gc1_tp1
+    S2_tp1 = (ρ-1)*vmr2_tp1 -ρ*gc2_tp1
+
+    log_SDF = S0_tp1 + S1_tp1 + 0.5 * S2_tp1 + log_N_tilde
+
+    return log_SDF, gc_tp1, X1_tp1, X2_tp1
 
 def solve_BY(ρ= 2./3):
 
@@ -108,20 +119,28 @@ def solve_BY(ρ= 2./3):
     ϕ_d = 4.5 * σ_original
     π = 0.0
 
-    plug_in = False
-    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, plug_in)
+    eq = eq_cond_BY
+    ss = ss_func_BY 
+    var_shape = (1, 2, 4)
+    gc_tp1_fun = gc_tp1_approx
+    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, 'eq_cond')
+    init_util = None
+    iter_tol = 1e-8
+    max_iter = 50
+    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, init_util, iter_tol, max_iter)
 
-    ModelSol = uncertain_expansion(eq_cond_BY, ss_func_BY, (1, 2, 4), args, [gc_tp1_approx], adj_loc_list = [], endo_loc_list = [], init_N = 'N0', util_adj = False, tol = 1e-8, max_iter = 50)
-
-    res = {'Z1_tp1':ModelSol['Z1_tp1'],\
-            'Z2_tp1':ModelSol['Z2_tp1'],\
-            'vmc_t':ModelSol['util_sol']['vmc_t'],\
-            'rmc_t':ModelSol['util_sol']['rmc_t'],\
-            'log_N':ModelSol['log_N'],\
+    res = {'X1_tp1':ModelSol['X1_tp1'],\
+            'X2_tp1':ModelSol['X2_tp1'],\
+            'log_N_tilde':ModelSol['log_N_tilde'],\
             'β':ModelSol['args'][1],\
             'ρ':ModelSol['args'][2],\
+            'vmr1_tp1':ModelSol['vmr1_tp1'],\
+            'vmr2_tp1':ModelSol['vmr2_tp1'],\
             'var_shape':ModelSol['var_shape'],\
-            'gc_tp1':ModelSol['scale_tp1'][0][0]}
+            'gc_tp1':ModelSol['gc_tp1'],\
+            'gc0_tp1':ModelSol['gc0_tp1'],\
+            'gc1_tp1':ModelSol['gc1_tp1'],\
+            'gc2_tp1':ModelSol['gc2_tp1']}
 
     return res
 
@@ -158,32 +177,40 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
     ϕ_d = 4.5 * σ_original
     π = 0.0
 
-    plug_in = False
-    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, plug_in)
+    eq = eq_cond_BY
+    ss = ss_func_BY 
+    var_shape = (1, 2, 4)
+    gc_tp1_fun = gc_tp1_approx
+    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, 'eq_cond')
+    init_util = None
+    iter_tol = 1e-8
+    max_iter = 50
+    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, init_util, iter_tol, max_iter)
 
-    ModelSol = uncertain_expansion(eq_cond_BY, ss_func_BY, (1, 2, 4), args, [gc_tp1_approx], adj_loc_list = [], endo_loc_list = [], init_N = 'N0', util_adj = False, tol = 1e-8, max_iter = 50)
-
-    res = {'Z1_tp1':ModelSol['Z1_tp1'],\
-            'Z2_tp1':ModelSol['Z2_tp1'],\
-            'vmc_t':ModelSol['util_sol']['vmc_t'],\
-            'rmc_t':ModelSol['util_sol']['rmc_t'],\
-            'log_N':ModelSol['log_N'],\
+    res = {'X1_tp1':ModelSol['X1_tp1'],\
+            'X2_tp1':ModelSol['X2_tp1'],\
+            'log_N_tilde':ModelSol['log_N_tilde'],\
             'β':ModelSol['args'][1],\
             'ρ':ModelSol['args'][2],\
+            'vmr1_tp1':ModelSol['vmr1_tp1'],\
+            'vmr2_tp1':ModelSol['vmr2_tp1'],\
             'var_shape':ModelSol['var_shape'],\
-            'gc_tp1':ModelSol['scale_tp1'][0][0]}
+            'gc_tp1':ModelSol['gc_tp1'],\
+            'gc0_tp1':ModelSol['gc0_tp1'],\
+            'gc1_tp1':ModelSol['gc1_tp1'],\
+            'gc2_tp1':ModelSol['gc2_tp1']}
 
     T = 360
     quantile = [0.25, 0.5, 0.75]
 
-    log_SDF, gc_tp1, Z1_tp1, Z2_tp1 = calc_SDF(res)
-    expo_elas_shock_0 = [exposure_elasticity(gc_tp1, Z1_tp1, Z2_tp1, T, shock=0, percentile=p) for p in quantile] 
-    expo_elas_shock_1 = [exposure_elasticity(gc_tp1, Z1_tp1, Z2_tp1, T, shock=1, percentile=p) for p in quantile]
-    expo_elas_shock_2 = [exposure_elasticity(gc_tp1, Z1_tp1, Z2_tp1, T, shock=2, percentile=p) for p in quantile]
+    log_SDF, gc_tp1, X1_tp1, X2_tp1 = calc_SDF(res)
+    expo_elas_shock_0 = [exposure_elasticity(gc_tp1, X1_tp1, X2_tp1, T, shock=0, percentile=p) for p in quantile] 
+    expo_elas_shock_1 = [exposure_elasticity(gc_tp1, X1_tp1, X2_tp1, T, shock=1, percentile=p) for p in quantile]
+    expo_elas_shock_2 = [exposure_elasticity(gc_tp1, X1_tp1, X2_tp1, T, shock=2, percentile=p) for p in quantile]
 
-    price_elas_shock_0 = [price_elasticity(gc_tp1, log_SDF, Z1_tp1, Z2_tp1, T, shock=0, percentile=p) for p in quantile]
-    price_elas_shock_1 = [price_elasticity(gc_tp1, log_SDF, Z1_tp1, Z2_tp1, T, shock=1, percentile=p) for p in quantile]
-    price_elas_shock_2 = [price_elasticity(gc_tp1, log_SDF, Z1_tp1, Z2_tp1, T, shock=2, percentile=p) for p in quantile]
+    price_elas_shock_0 = [price_elasticity(gc_tp1, log_SDF, X1_tp1, X2_tp1, T, shock=0, percentile=p) for p in quantile]
+    price_elas_shock_1 = [price_elasticity(gc_tp1, log_SDF, X1_tp1, X2_tp1, T, shock=1, percentile=p) for p in quantile]
+    price_elas_shock_2 = [price_elasticity(gc_tp1, log_SDF, X1_tp1, X2_tp1, T, shock=2, percentile=p) for p in quantile]
     
     fig, axes = plt.subplots(2,3, figsize = (25,13))
     index = ['T','0.25 quantile','0.5 quantile','0.75 quantile']
@@ -196,9 +223,7 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
 
     n_qt = len(quantile)
     plot_expo_elas = [plot_expo_elas_shock_0, plot_expo_elas_shock_2, plot_expo_elas_shock_1] 
-    print(np.max(abs(np.array([expo_elas_shock_0,expo_elas_shock_2,expo_elas_shock_1]))))
     plot_price_elas = [plot_price_elas_shock_0, plot_price_elas_shock_2, plot_price_elas_shock_1] 
-    print(np.max(abs(np.array([price_elas_shock_0,price_elas_shock_2,price_elas_shock_1]))))
     shock_name = ['growth shock', 'consumption shock', 'volatility shock']
     qt = ['0.25 quantile','0.5 quantile','0.75 quantile']
     colors = ['green','red','blue']
@@ -233,20 +258,3 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
     plt.show()
 
     # return expo_elas_shock_0, expo_elas_shock_1, expo_elas_shock_2, price_elas_shock_0, price_elas_shock_1, price_elas_shock_2
-
-# i=0
-# for gamma in tqdm([5, 10, 20]):
-#     for beta in tqdm([0.995, 0.998, 0.999]):
-#         for rho in [2./3, 1.00001, 1.5, 10]:
-#             for mu in [0.001, 0.0015, 0.002]:
-#                 for phic in [0.007,0.0078,0.0086]:
-#                     name = '_'.join(['res','gamma',str("{:.4f}".format(gamma)).replace('.',''),\
-#                                         'beta',str("{:.4f}".format(beta)).replace('.',''),\
-#                                         'rho',str("{:.4f}".format(rho)).replace('.',''),\
-#                                         'mu',str("{:.4f}".format(mu)).replace('.',''),\
-#                                         'phic',str("{:.4f}".format(phic)).replace('.','')])
-#                     i+=1
-#                     print(i,name)
-#                     with open('data/'+name+'.pkl', 'wb') as f:
-#                         pickle.dump([solve_BY_elas(γ=gamma, β=beta, ρ=rho, μ=mu, ϕ_c=phic)],f)
-                    

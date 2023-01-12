@@ -154,7 +154,17 @@ def kron_prod(Y1, Y2):
     return Y_kron
 
 def lq_sum(lq_list):
+    """
+    Compute the sum of a list of LinQuadVar.
+    
+    Parameters
+    ----------
+    lq_list: a list of LinQuadVar
 
+    Returns
+    lq_sum : LinQuadVar
+
+    """
     lq_sum = LinQuadVar({'c':np.zeros([lq_list[0].shape[0],1])},lq_list[0].shape)
     for i in range(len(lq_list)):
         lq_sum += lq_list[i]
@@ -346,6 +356,28 @@ def distance(Y1, Y2, keys_to_compare = None):
     return dist
 
 def M_mapping(M, f, X1_tp1, X2_tp1, second_order = True):
+    r'''
+    Computes coefficients of a LinQuadVar after one iteration of M mapping
+
+    Parameters
+    ----------
+    log_M_growth : LinQuadVar
+        Log difference of multiplicative functional.
+        e.g. log consumption growth, :math:`\log \frac{C_{t+1}}{C_t}`
+    f : LinQuadVar
+        The function M Mapping operate on. 
+        e.g. A function that is identically one, log_f = LinQuadVar({'c': np.zeros((1,1))}, log_M_growth.shape)
+    X1_tp1 : LinQuadVar 
+        Stores the coefficients of laws of motion for X1.
+    X2_tp2 : LinQuadVar or None
+        Stores the coefficients of laws of motion for X2.  
+    second_order: boolean
+        Whether the second order expansion of the state evoluton equation has been input
+        
+    Returns
+    -------
+    LinQuadVar, stores the coefficients of the new LinQuadVar after one iteration of M Mapping
+    '''
     if second_order:
         return log_E_exp(M + next_period(f, X1_tp1, X2_tp1))
     else:
@@ -355,6 +387,40 @@ def M_mapping(M, f, X1_tp1, X2_tp1, second_order = True):
     
 
 def Q_mapping(M, f, X1_tp1, X2_tp1, tol = 1e-10, max_iter = 20000, second_order = True):
+    r'''
+    Computes limiting coefficients of a LinQuadVar by recursively applying the M mapping operator till convergence, returns the eigenvalue and eigenvector.
+
+    Parameters
+    ----------
+    log_M_growth : LinQuadVar
+        Log difference of multiplicative functional.
+        e.g. log consumption growth, :math:`\log \frac{C_{t+1}}{C_t}`
+    f : LinQuadVar
+        The function M Mapping operate on. 
+        e.g. A function that is identically one, log_f = LinQuadVar({'c': np.zeros((1,1))}, log_M_growth.shape)
+    X1_tp1 : LinQuadVar 
+        Stores the coefficients of laws of motion for X1.
+    X2_tp2 : LinQuadVar or None
+        Stores the coefficients of laws of motion for X2.  
+    tol: float
+        tolerance for convergence
+    max_iter: int
+        maximum iteration
+    second_order: boolean
+        Whether the second order expansion of the state evoluton equation has been input
+
+    Returns
+    -------
+    Qf_components_log : List of LinQuadVar
+        stores the coefficients of the LinQuadVar in each iteration of M Mapping
+    f: LinQuadVar
+        The function M Mapping operate on. 
+        e.g. A function that is identically one, log_f = LinQuadVar({'c': np.zeros((1,1))}, log_M_growth.shape)
+    η: float
+        The eigenvalue
+    η_series: list of float
+        The convergence path of the eigenvalue 
+    '''
     η_series = []
     Qf_components_log = []
 #    Qf_evaluate = 0.
@@ -383,6 +449,9 @@ def Q_mapping(M, f, X1_tp1, X2_tp1, tol = 1e-10, max_iter = 20000, second_order 
     return Qf_components_log, f, η, η_series
     
 def Q_mapping_eval(Qf_components_log, η, x):
+    """
+    Evaluate all the Qf_components_log given x recurisvely
+    """
     Qf_evaluate = 0.
 
     for i in range(len(Qf_components_log)-1):
@@ -393,7 +462,9 @@ def Q_mapping_eval(Qf_components_log, η, x):
     return Qf_evaluate.item()
 
 def Q_mapping_eval_all(Qf_components_log, η, X_series):
-
+    """
+    Evaluate all the Qf_components_log given x collectively
+    """
     main_periods = len(Qf_components_log)-1
     Qf_evaluate_period = np.zeros([main_periods+1, X_series[0].shape[1]])
     for i in range(main_periods):
@@ -429,119 +500,3 @@ def _E_exp_W_jit(Y_x2, Y_x, Y_w, Y_c, Y_xx, Y_xw, Y_ww, n_X, n_W, x1, x2):
     term_3 = temp_inv@A.T
 
     return term_0[0,0]*term_1*term_2[0,0]*term_3
-
-def Q_mapping_eval_tp11(Qf_components_log, η, x):
-    Qf_evaluate = 0.
-
-    for i in range(11,len(Qf_components_log)-1):
-        Qf_evaluate += np.exp(Qf_components_log[i](*x))
-
-    Qf_evaluate += np.exp(Qf_components_log[-1](*x))/(1-np.exp(η))
-
-    return Qf_evaluate.item()
-
-def Q_mapping_11(M, f, X1_tp1, X2_tp1, tol = 1e-10, max_iter = 10000, second_order = True):
-    Qf_components_log = []
-#    Qf_evaluate = 0.
-    for i in range(11):
-        Qf_components_log.append(f)
-#        Qf_evaluate += np.exp(f(*x))
-        if second_order:
-            f_next = M_mapping(M, f, X1_tp1, X2_tp1)
-        else:
-            if X2_tp1 != None:
-                print('The second order expansion for law of motion is not used in the first order expansion.')
-            f_next = M_mapping(M, f, X1_tp1, second_order = second_order)
-        η = (f_next['c'] - f['c']).item()
-        
-    Qf_components_log.append(f_next)
-    
-    return Qf_components_log, f, η
-
-def Q_mapping_eval_11(Qf_components_log, η, x):
-    Qf_evaluate = 0.
-
-    for i in range(len(Qf_components_log)):
-        Qf_evaluate += np.exp(Qf_components_log[i](*x))
-
-    return Qf_evaluate.item()
-
-def calc_PD(Qf_components_log, η, x):
-    numerator = Q_mapping_eval_tp11(Qf_components_log, η, x)
-    Qf_components_log_D_11, _, η_D_third_11= Q_mapping_11(log_D_growth, log_f, modelSol.Z1_tp1, modelSol.Z2_tp1)
-    denominator = Q_mapping_eval_11(Qf_components_log_D_11, η_D_third_11, (np.zeros([n_Z,1]),np.zeros([n_Z,1])))    
-    return numerator/denominator
-
-def Q_der_17(Qf_components_log, Qf_evaluate, η, log_M, x, X1_tp1, X2_tp1, α):
-    
-    numerator = 0.
-    for i in range(len(Qf_components_log) - 1):
-        component = previous_period(Qf_components_log[i], X1_tp1, X2_tp1)
-        numerator += E_exp_W(log_M + component, x)
-    numerator += E_exp_W(log_M + previous_period(Qf_components_log[-1], \
-                                                 X1_tp1, X2_tp1) ,x)/(1-np.exp(η))
-    return (α.T@numerator / Qf_evaluate).item()
-
-def pd_ratio_adjust(model_Sol, gc0_tp1, gd0_tp1, gc1_tp1, gd1_tp1, vmc_t_order, rmc_t_order, pd_t_order, args = (), tol = 1e-7):
-
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
-
-    η_m = (np.log(β) - ρ*gc0_tp1['c']+gd0_tp1['c']).item()
-    dM1_tp1 = ((ρ-1)*(previous_period(model_Sol['X1_t'][vmc_t_order],model_Sol.Z1_tp1,model_Sol.Z2_tp1)-model_Sol['X1_t'][rmc_t_order])-gc1_tp1)+gd1_tp1
-
-    n_Y, n_Z, n_W = model_Sol.var_shape 
-
-    def return_order1_t(order1_t_coeffs):
-        return LinQuadVar({'c': np.array([[order1_t_coeffs[0]]]), 'x':np.array([order1_t_coeffs[1:]])},(1, n_Z, n_W))
-
-    def E_N1_tp1(Y):
-        E_Y = {}
-        temp_x = Y['w'] @ model_Sol['μ_1']
-        E_Y['x'] = Y['x'] + temp_x 
-        E_Y['c'] = Y['c'] + Y['w'] @ model_Sol['μ_0']
-        E_Y = LinQuadVar(E_Y, (1, n_Z, n_W), False)
-        return E_Y
-
-    def solve_pd1_t_first(order1_init_coeffs):
-        pd1_t = return_order1_t(order1_init_coeffs)
-        LHS = E_N1_tp1(dM1_tp1 + np.exp(η_m) *previous_period(pd1_t, model_Sol.Z1_tp1, model_Sol.Z2_tp1))
-        LHS_list = [LHS['c'].item()]+ [i for i in LHS['x'][0]] 
-        return list(np.array(LHS_list) - np.array(order1_init_coeffs))
-    
-    pd1_t_sol = optimize.root(solve_pd1_t_first, x0 = [0]*(1 + n_Z),tol = tol)['x']
-    pd1_t = return_order1_t(pd1_t_sol)
-    print(optimize.root(solve_pd1_t_first, x0 = [0]*(1 +n_Z),tol = tol)['message'])
-
-    N = model_Sol.X1_t['x'][:n_Y]
-    N[pd_t_order,:] = pd1_t['x'][0]
-    C = model_Sol.X1_t['c'][:n_Y]
-    C[pd_t_order,:] = pd1_t['c'][0]
-
-    X0_t = model_Sol.X0_t
-
-    Y1_t = LinQuadVar({'x': N, 'c': C}, (n_Y, n_Z, n_W), False)
-    X1_t = concat([Y1_t, model_Sol.Z1_t])
-
-    G = model_Sol['G_M1_0']
-    Y2_t = LinQuadVar({'x2': N,
-                    'xx': G[:, 1+n_Z:1+n_Z+n_Z**2],
-                    'x': G[:, 1:1+n_Z],
-                    'c': G[:, :1]}, (n_Y, n_Z, n_W), False)
-    X2_t = concat([Y2_t, model_Sol.Z2_t])
-    X_t = X0_t + X1_t + X2_t*0.5
-
-    Z1Z1 = kron_prod(model_Sol.Z1_tp1, model_Sol.Z1_tp1)
-
-    X_tp1 = next_period(X_t, model_Sol.Z1_tp1, model_Sol.Z2_tp1, Z1Z1)
-    X1_tp1 = next_period(X1_t, model_Sol.Z1_tp1)
-    X2_tp1 = next_period(X2_t, model_Sol.Z1_tp1, model_Sol.Z2_tp1, Z1Z1)
-
-    model_Sol_adj = deepcopy(model_Sol)
-    model_Sol_adj['X_t'] = X_t
-    model_Sol_adj['X1_t'] = X1_t
-    model_Sol_adj['X2_t'] = X2_t
-    model_Sol_adj['X_tp1'] = X_tp1
-    model_Sol_adj['X1_tp1'] = X1_tp1
-    model_Sol_adj['X2_tp1'] = X2_tp1
-
-    return model_Sol_adj
