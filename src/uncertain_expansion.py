@@ -11,21 +11,20 @@ from lin_quad import LinQuadVar
 
 '''
 This Python script provides functions to solve for the discrete-time 
-dynamic macro-finance models under uncertainty, based on the 
-perturbation method. These models feature EZ recursive preferences.
+dynamic macro-finance models under uncertainty, based on the small-
+noise expansion method. These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Codes updated on Jan. 11, 2023, 6:34 P.M. CT
+Codes updated on Jan. 14, 2023, 11:23 A.M. CT
 Check and obtain the lastest version on 
 https://github.com/lphansen/RiskUncertaintyValue 
 '''
 
-def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol = 1e-8, max_iter = 50):
-    
+def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util = None, iter_tol = 1e-8, max_iter = 50):
     """
     This function solves a system with recursive utility via small-noise
-        expansion, given a set of equilibrium conditions, steady states,
-        consumption growth, and other model configurations. 
+    expansion, given a set of equilibrium conditions, steady states,
+    log consumption growth, and other model configurations. 
 
     The solver returns a class storing solved variables. In particular, 
     it stores the solved variables represented by a linear or
@@ -35,24 +34,24 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     Parameters
     ----------
     eq_cond : callable
-        Returns [Q psi_1-psi_2, phi_var - phi], Q psi_1-psi_2 satisfy the 
+        Returns [Q psi_1-psi_2, phi], Q psi_1-psi_2 satisfy the 
         forward-looking equations E[N Q psi_1-psi_2]=0, and phi satisfy 
-        the state equations phi_var - phi=0
+        the state equations phi=0
 
-        ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_JX, ) ndarray``
+        ``eq_cond(Var_t, Var_tp1, W_tp1, q, mode, *args) -> (n_JX, ) ndarray``
 
         where Var_t and Var_tp1 are variables at time t and t+1 respectively,
         W_tp1 are time t+1 shocks, and q is perturbation parameter.
-        Note that in Var_t and Var_tp1, state variables must follow endogenous 
+        Note that in Var_t and Var_tp1, state variables must follow jump 
         variables. The first one must be q_t or q_tp1. In the equilibrium 
         conditions, state evolution equations should follow forward-looking 
         equations.
 
         Under 'psi1' mode, returns psi_1, 
 
-        ``eq_cond(Var_t, Var_tp1, W_tp1, q, *args) -> (n_J, ) ndarray``
+        ``eq_cond(Var_t, Var_tp1, W_tp1, q, mode, *args) -> (n_J, ) ndarray``
 
-        'psi1' mode specification is mandatory. Other modes are optional.
+        'psi1' mode specification is necessary. Other modes are optional.
     ss : callable or (n_JX, ) ndarray
         Steady states or the function for calculating steady states.
         It follows the same order as Var_t and Var_tp1 in equilibrium 
@@ -60,13 +59,16 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     var_shape : tuple of ints
         (n_J, n_X, n_W). Number of jump variables, states and
         shocks respectively.
-    args : tuple of floats/strings
+    args : tuple of floats/ndarray
         Model parameters, the first three elements are fixed recursive 
         utility parameters, γ, β, ρ
-        The last item is reserved to `mode`, a string that specifies 
-        what the `eq_cond` should return.
     gc : callable
         Function to approximate the log growth of consumption.
+    approach : string
+        '1': Solve the system using the approach 1 shown in 'Exploring 
+            Recursive Utility' notes.
+        '2': Solve the system using the approach 2 shown in 'Exploring 
+            Recursive Utility' notes.
     init_util: dict
         Initialization of $mu^0, Upsilon^2_0, Upsilon^2_1,$ and $Upsilon^2_2$. 
         Users may provide a dictionary that maps the keys `mu_0`, `Upsilon_0`, 
@@ -86,14 +88,13 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
         motion for the first-order (and second-order) derivatives of states. 
 
     """
-
     n_J, n_X, n_W = var_shape
     n_JX = n_J + n_X
     γ = args[0]
     β = args[1]
     ρ = args[2]
     df, ss = take_derivatives(eq, ss, var_shape, True, args)
-    H_fun_list = [(lambda y: (lambda JX_t, JX_tp1, W_tp1, q, *args: eq(JX_t, JX_tp1, W_tp1, q, *(*list(args)[:-1], 'psi1'))[y]))(i) for i in range(n_J)]
+    H_fun_list = [(lambda y: (lambda JX_t, JX_tp1, W_tp1, q, *args: eq(JX_t, JX_tp1, W_tp1, q, 'psi1', *args)[y]))(i) for i in range(n_J)]
 
     X0_t = LinQuadVar({'c': ss[n_J:].reshape(-1, 1)}, (n_X, n_X, n_W), False)
     J0_t = LinQuadVar({'c': ss[:n_J].reshape(-1, 1)}, (n_J, n_X, n_W), False)
@@ -109,7 +110,11 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
                     'Upsilon_0':np.zeros([n_W,1])}
     else:
         util_sol = init_util
-                
+
+    util_sol['Σ_tilde'] = np.linalg.inv(np.eye(n_W)-0.5*util_sol['Upsilon_2']*(1-γ))
+    util_sol['Γ_tilde'] = sp.linalg.sqrtm(util_sol['Σ_tilde'])
+    util_sol['μ_tilde_t'] = LinQuadVar({'x':0.5*(1-γ)*util_sol['Σ_tilde']@util_sol['Upsilon_1'], 'c':(1-γ)*util_sol['Σ_tilde']@(1/(1-γ)*util_sol['μ_0']+0.5*(util_sol['Upsilon_0']-util_sol['Upsilon_2']@util_sol['μ_0']))},shape=(n_W,n_X,n_W))
+            
     μ_0_series = []
     J1_t_series = []
     J2_t_series = []
@@ -119,11 +124,17 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     error = 1
 
     while error > iter_tol and i < max_iter:
-        
-        J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde, schur = first_order_expansion(df, util_sol, var_shape, H0_t, args)
-        adj, lq1, lq2, lq3, lq4, H_approx = compute_adj(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0_t, args)
-        J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde, schur = second_order_expansion(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape)
-        util_sol = solve_utility(γ, β, ρ, ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc)
+        if approach == '1':
+            J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde = first_order_expansion_approach_1(df, util_sol, var_shape, H0_t, args)
+            adj = compute_adj_approach_1(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0_t, args)
+            J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde = second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape)
+        elif approach == '2':
+            J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde = first_order_expansion_approach_2(df, util_sol, var_shape, H0_t, args)
+            adj = compute_adj_approach_2(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0_t, args)
+            J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde = second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape)
+        else: 
+            raise ValueError('Please input approach 1 or 2 with string.')
+        util_sol = solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc)
         μ_0_series.append(util_sol['μ_0'])
         J1_t_series.append(J1_t(*(np.ones([n_X,1]),np.ones([n_X,1]),np.ones([n_X,1]))))
         J2_t_series.append(J2_t(*(np.ones([n_X,1]),np.ones([n_X,1]),np.ones([n_X,1]))))
@@ -143,16 +154,39 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, init_util = None, iter_tol 
     JX_tp1_tilde = next_period(JX_t, X1_tp1_tilde, X2_tp1_tilde)
 
     return ModelSolution({
-                        'X0_t':X0_t, 'X1_t':X1_t, 'X2_t':X2_t, 'X1_tp1': X1_tp1, 'X2_tp1': X2_tp1,
-                        'X1_tp1_tilde': X1_tp1_tilde, 'X2_tp1_tilde': X2_tp1_tilde,
-                        'J0_t':J0_t, 'J1_t':J1_t, 'J2_t':J2_t,
-                        'JX0_t':JX0_t, 'JX1_t':JX1_t, 'JX2_t':JX2_t, 'JX1_tp1': JX1_tp1, 'JX2_tp1': JX2_tp1, 'JX_t': JX_t, 'JX_tp1': JX_tp1,
-                        'JX1_tp1_tilde': JX1_tp1_tilde, 'JX2_tp1_tilde': JX2_tp1_tilde, 'JX_tp1_tilde': JX_tp1_tilde,
-                        'util_sol':util_sol, 'log_N0': util_sol['log_N0'], 'log_N_tilde':util_sol['log_N_tilde'],
-                        'vmr1_tp1':util_sol['vmr1_tp1'], 'vmr2_tp1':util_sol['vmr2_tp1'],
-                        'gc_tp1':util_sol['gc_tp1'],'gc0_tp1':util_sol['gc0_tp1'],'gc1_tp1':util_sol['gc1_tp1'],'gc2_tp1':util_sol['gc2_tp1'],
-                        'var_shape': var_shape, 'args':args, 
-                        'ss': ss, 'second_order': True})
+                        'X0_t':X0_t, 
+                        'X1_t':X1_t, 
+                        'X2_t':X2_t, 
+                        'X1_tp1': X1_tp1, 
+                        'X2_tp1': X2_tp1,
+                        'X1_tp1_tilde': X1_tp1_tilde, 
+                        'X2_tp1_tilde': X2_tp1_tilde,
+                        'J0_t':J0_t, 
+                        'J1_t':J1_t, 
+                        'J2_t':J2_t,
+                        'JX0_t':JX0_t, 
+                        'JX1_t':JX1_t, 
+                        'JX2_t':JX2_t, 
+                        'JX1_tp1': JX1_tp1, 
+                        'JX2_tp1': JX2_tp1, 
+                        'JX_t': JX_t, 
+                        'JX_tp1': JX_tp1,
+                        'JX1_tp1_tilde': JX1_tp1_tilde, 
+                        'JX2_tp1_tilde': JX2_tp1_tilde, 
+                        'JX_tp1_tilde': JX_tp1_tilde,
+                        'util_sol':util_sol, 
+                        'log_N0': util_sol['log_N0'], 
+                        'log_N_tilde':util_sol['log_N_tilde'],
+                        'vmr1_tp1':util_sol['vmr1_tp1'], 
+                        'vmr2_tp1':util_sol['vmr2_tp1'],
+                        'gc_tp1':util_sol['gc_tp1'],
+                        'gc0_tp1':util_sol['gc0_tp1'],
+                        'gc1_tp1':util_sol['gc1_tp1'],
+                        'gc2_tp1':util_sol['gc2_tp1'],
+                        'var_shape': var_shape, 
+                        'args':args, 
+                        'ss': ss, 
+                        'second_order': True})
     
 def take_derivatives(f, ss, var_shape, second_order,
                       args):
@@ -169,7 +203,7 @@ def take_derivatives(f, ss, var_shape, second_order,
         ss = ss(*args)
 
     dfq = compute_derivatives(f=lambda Var_t, Var_tp1, W_tp1, q:
-                             anp.atleast_1d(f(Var_t, Var_tp1, W_tp1, q, *args)),
+                             anp.atleast_1d(f(Var_t, Var_tp1, W_tp1, q, 'eq_cond', *args)),
                              X=[ss, ss, W_0, q_0],
                              second_order=second_order)
                  
@@ -190,9 +224,9 @@ def take_derivatives(f, ss, var_shape, second_order,
     ss = ss[1:]            
     return df, ss
 
-def first_order_expansion(df, util_sol, var_shape, H0, args):
+def first_order_expansion_approach_1(df, util_sol, var_shape, H0, args):
     """
-    Implements first-order expansion.
+    Implements first-order expansion using approach 1.
 
     """
     n_J, n_X, n_W = var_shape
@@ -236,11 +270,11 @@ def first_order_expansion(df, util_sol, var_shape, H0, args):
     JX1_tp1 = next_period(JX1_t, X1_tp1)
     JX1_tp1_tilde = next_period(JX1_t, X1_tp1_tilde)
     
-    return J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde, schur
+    return J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde
 
-def compute_adj(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0, args):
+def compute_adj_approach_1(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0, args):
     """
-    Computes additional recursive utility adjustment
+    Computes additional recursive utility adjustment using approach 1.
 
     """
     n_J, n_X, n_W = var_shape
@@ -274,11 +308,11 @@ def compute_adj(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0, args):
         adj_aug['x'][HQ_loc_list[i]] = adj[i]['x']
         adj_aug['c'][HQ_loc_list[i]] = adj[i]['c']
 
-    return adj_aug, lq1, lq2, lq3, lq4, H_approx
+    return adj_aug
 
-def second_order_expansion(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape):
+def second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape):
     """
-    Implements second-order expansion.
+    Implements second-order expansion using approach 1.
 
     """
     n_J, n_X, n_W = var_shape
@@ -286,22 +320,28 @@ def second_order_expansion(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, J
     schur = schur_decomposition(-df['xtp1'], df['xt'], (n_J, n_X, n_W))
     μ_0 = util_sol['μ_0']
 
-    def guess_verify(Wtp1, M_E_w, X1_tp1, JX1_tp1):
-        
+    Wtp1 = LinQuadVar({'w': np.eye(n_W),'c':μ_0}, (n_W, n_X, n_W), False)
+    D2 = combine_second_order_terms(df, JX1_t, JX1_tp1_tilde, Wtp1)
+    D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
+    M_E_w = np.zeros([n_W,1])
+    cov_w = np.eye(n_W)
+    M_E_ww = cal_E_ww(M_E_w, cov_w)
+    E_D2 = E(D2, M_E_w, M_E_ww)
+    E_D2_coeff = np.block([[E_D2['c']+adj['c'], E_D2['x']+adj['x'], E_D2['xx']]])
+    X1X1_tilde = kron_prod(X1_tp1_tilde, X1_tp1_tilde)
+    M_mat = form_M0(M_E_w, M_E_ww, X1_tp1_tilde, X1X1_tilde)
+    LHS = np.eye(n_J*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
+    RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_J:]))
+    D_tilde_vec = np.linalg.solve(LHS, RHS)
+    D_tilde = mat(D_tilde_vec, (n_J, 1+n_X+n_X**2))
+    G = np.linalg.solve(schur['Z21'], D_tilde)
+
+    def solve_second_state(X1_tp1, JX1_tp1, Wtp1):
+
         D2 = combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1)
         D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
-        
-        cov_w = np.eye(n_W)
-        M_E_ww = cal_E_ww(M_E_w, cov_w)
-        E_D2 = E(D2, M_E_w, M_E_ww)
-        E_D2_coeff = np.block([[E_D2['c']+adj['c'], E_D2['x']+adj['x'], E_D2['xx']]])
+
         X1X1 = kron_prod(X1_tp1, X1_tp1)
-        M_mat = form_M0(M_E_w, M_E_ww, X1_tp1, X1X1)
-        LHS = np.eye(n_J*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
-        RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_J:]))
-        D_tilde_vec = np.linalg.solve(LHS, RHS)
-        D_tilde = mat(D_tilde_vec, (n_J, 1+n_X+n_X**2))
-        G = np.linalg.solve(schur['Z21'], D_tilde)
         Y2_coeff = -df['xtp1'][n_J:]@schur['N_block']
         C_hat = np.linalg.solve(Y2_coeff, D2_coeff[n_J:])
         C_hat_coeff = np.split(C_hat, np.cumsum([1, n_X, n_W, n_X**2, n_X*n_W]),axis=1)
@@ -322,15 +362,13 @@ def second_order_expansion(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, J
 
         X2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_tilde_xx, 'xw': ψ_tilde_xw, 'ww': ψ_tilde_ww, 'x': ψ_tilde_xq, 'w': ψ_tilde_wq, 'c': ψ_tilde_qq}, (n_X, n_X, n_W),False)
 
-        return X2_tp1, G
+        return X2_tp1
 
     Wtp1 = LinQuadVar({'w': np.eye(n_W),'c':μ_0}, (n_W, n_X, n_W), False)
-    M_E_w = np.zeros([n_W,1])
-    X2_tp1_tilde, G = guess_verify(Wtp1, M_E_w, X1_tp1_tilde, JX1_tp1_tilde)
+    X2_tp1_tilde = solve_second_state(X1_tp1_tilde, JX1_tp1_tilde, Wtp1)
     
     Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_X, n_W), False)
-    M_E_w = μ_0
-    X2_tp1, _ = guess_verify(Wtp1, M_E_w, X1_tp1, JX1_tp1)
+    X2_tp1 = solve_second_state(X1_tp1, JX1_tp1, Wtp1)
 
     J2_t = LinQuadVar({'x2': schur['N'], 'xx': G[:, 1+n_X:1+n_X+(n_X)**2], 'x': G[:, 1:1+n_X], 'c': G[:, :1]}, (n_J, n_X, n_W), False)
     X2_t = LinQuadVar({'x2': np.eye(n_X)}, (n_X, n_X, n_W), False)
@@ -338,8 +376,193 @@ def second_order_expansion(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, J
     JX2_tp1 = next_period(JX2_t, X1_tp1, X2_tp1)
     JX2_tp1_tilde = next_period(JX2_t, X1_tp1_tilde, X2_tp1_tilde)
 
-    return J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde, schur
+    return J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde
+
+def first_order_expansion_approach_2(df, util_sol, var_shape, H0, args):
+    """
+    Implements first-order expansion using approach 2.
+
+    """
+    n_J, n_X, n_W = var_shape
+    n_JX = n_J + n_X
+    HQ_loc_list = [i for i in range(n_J)]
     
+    γ = args[0]
+    ρ = args[2]
+    μ_0 = util_sol['μ_0']
+    Σ_tilde = util_sol['Σ_tilde']
+    Γ_tilde = util_sol['Γ_tilde']
+    μ_tilde_t = util_sol['μ_tilde_t']
+
+    H_1_x = np.zeros([n_JX,n_X])
+    H_1_c = np.zeros([n_JX,1])
+    for i in range(len(H0)):
+        H_1_x[HQ_loc_list[i]] = (ρ-1)/(1-γ)*μ_0.T@μ_tilde_t['x']*H0[i]
+        H_1_c[HQ_loc_list[i]] = μ_0.T@μ_0*(ρ-1)/2/(1-γ)*H0[i]+(ρ-1)/(1-γ)*μ_0.T@(μ_tilde_t['c']-μ_0)*H0[i]
+    df_adj = np.block([[np.zeros([n_JX,n_J]),H_1_x]])
+    df_mix = np.block([[np.zeros([n_JX,n_J]),df['wtp1']@μ_tilde_t['x']]])
+
+    schur = schur_decomposition(-df['xtp1'], df['xt']+df_adj+df_mix, (n_J, n_X, n_W))
+    
+    f_1_xtp1 = df['xtp1'][:n_J]
+    f_1_wtp1 = df['wtp1'][:n_J]
+    f_2_xtp1 = df['xtp1'][n_J:]
+    f_2_xt_tilde = (df['xt']+df_adj+df_mix)[n_J:]
+    f_2_wtp1 = df['wtp1'][n_J:]
+
+    RHS = - (df['wtp1']@μ_tilde_t['c']+H_1_c)
+    LHS = df['xtp1'] + df['xt'] + df_adj + df_mix
+    D = np.linalg.solve(LHS, RHS)
+    C = D[:n_J] - schur['N']@D[n_J:]
+
+    ψ_tilde_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt_tilde@schur['N_block'])
+    ψ_tilde_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)@Γ_tilde
+    ψ_tilde_q = D[n_J:] - ψ_tilde_x@D[n_J:]
+
+    f_2_xt_org = df['xt'][n_J:]
+    ψ_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt_org@schur['N_block'])
+    ψ_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)
+
+    df_mix_org = df_mix.copy()
+    df_mix_org[n_J:] = 0
+
+    RHS_org = - (np.block([[(f_1_xtp1@schur['N_block']@ψ_w + f_1_wtp1)@μ_tilde_t['c']], [np.zeros((n_X, 1))]])+H_1_c)
+    LHS_org = df['xtp1'] + df['xt'] + df_adj + df_mix_org
+    D_org = np.linalg.solve(LHS_org, RHS_org)
+    ψ_q = D_org[n_J:] - ψ_tilde_x@D_org[n_J:]
+
+    X1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q}, (n_X, n_X, n_W), False)
+    X1_tp1_tilde = LinQuadVar({'x': ψ_tilde_x, 'w': ψ_tilde_w, 'c': ψ_tilde_q}, (n_X, n_X, n_W), False)
+    J1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_J,n_X,n_W), False)
+    X1_t = LinQuadVar({'x': np.eye(n_X)}, (n_X, n_X, n_W), False)
+    JX1_t = concat([J1_t, X1_t])
+    JX1_tp1 = next_period(JX1_t, X1_tp1)
+    JX1_tp1_tilde = next_period(JX1_t, X1_tp1_tilde)
+    
+    return J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde
+
+def compute_adj_approach_2(H_fun_list, ss, var_shape, util_sol, JX1_t, X1_tp1, H0, args):
+    """
+    Computes additional recursive utility adjustment using approach 2.
+
+    """
+    n_J, n_X, n_W = var_shape
+    n_JX = n_J + n_X
+    HQ_loc_list = [i for i in range(n_J)]
+
+    γ = args[0]
+    ρ = args[2]
+
+    H_approx = [approximate_fun(H_fun, np.concatenate([np.zeros(1), ss]), (1, n_X, n_W), concat([LinQuadVar({'c':np.zeros([1,1])}, shape=(1,n_X,n_W)),JX1_t]), None, X1_tp1, None, args, second_order = False) for H_fun in H_fun_list]
+    μ_0 = util_sol['μ_0']
+    Upsilon_2 = util_sol['Upsilon_2']
+    Upsilon_1 = util_sol['Upsilon_1']
+    Upsilon_0 = util_sol['Upsilon_0']
+    Σ_tilde = util_sol['Σ_tilde']
+    Γ_tilde = util_sol['Γ_tilde']
+    μ_tilde_t = util_sol['μ_tilde_t']
+    Theta_0 = [app[2]['c']+app[2]['w']@μ_0 for app in H_approx]
+    Theta_1 = [app[2]['x'] for app in H_approx]
+    Theta_2 = [app[2]['w'] for app in H_approx]
+
+    lq1 = [LinQuadVar({'xx': np.kron(2*(ρ-1)/(1-γ)*μ_0.T@μ_tilde_t['x'], Theta_1[i]) + np.kron(2*(ρ-1)/(1-γ)*μ_0.T@μ_tilde_t['x'], Theta_2[i]@μ_tilde_t['x']),
+                    'x': 2*(ρ-1)/(1-γ)*μ_0.T@μ_tilde_t['x']*(Theta_0[i]+Theta_2[i]@μ_tilde_t['c'] - Theta_2[i]@μ_0)+\
+                            2*(ρ-1)/(1-γ)*(μ_0.T@μ_tilde_t['c'] - μ_0.T@μ_0 + 0.5*μ_0.T@μ_0) * (Theta_1[i] + Theta_2[i]@μ_tilde_t['x']),
+                    'c': 2*(ρ-1)/(1-γ)*Theta_2[i]@Σ_tilde@μ_0 + 2*(ρ-1)/(1-γ)*(μ_0.T @ μ_tilde_t['c']-μ_0.T @ μ_0 + 0.5*μ_0.T @ μ_0)*(Theta_0[i]+Theta_2[i]@(μ_tilde_t['c'] - μ_0))
+                    }, (1, n_X, n_W)) for i in range(len(HQ_loc_list))] 
+    lq2 = [LinQuadVar({'xx': ((1-ρ)/(1-γ))**2*np.kron(μ_0.T@μ_tilde_t['x'],μ_0.T@μ_tilde_t['x'])*H0[i]+\
+                            (ρ-1)/2*(μ_tilde_t['x'].T@Upsilon_2@μ_tilde_t['x']).reshape([1,n_X*n_X])*H0[i]+\
+                            (ρ-1)*(μ_tilde_t['x'].T@Upsilon_1).reshape([1,n_X*n_X])*H0[i],
+                    'x': ((1-ρ)/(1-γ))**2*(2*(μ_0.T@μ_tilde_t['c']-0.5*μ_0.T@μ_0)*μ_0.T@μ_tilde_t['x'])*H0[i]+\
+                            (ρ-1)/2*2*((μ_tilde_t['c']-μ_0).T@Upsilon_2@μ_tilde_t['x'])*H0[i]+\
+                            (ρ-1)*((μ_tilde_t['x'].T@Upsilon_0).T +(μ_tilde_t['c'].T - μ_0.T)@Upsilon_1)*H0[i],
+                    'c': ((1-ρ)/(1-γ))**2*(μ_0.T@Σ_tilde@μ_0+(μ_0.T@μ_tilde_t['c']-0.5*μ_0.T@μ_0)**2)*H0[i]+\
+                            (ρ-1)/2*(np.trace(Upsilon_2@Σ_tilde-Upsilon_2)+(μ_tilde_t['c']-μ_0).T@Upsilon_2@(μ_tilde_t['c']-μ_0))*H0[i]+\
+                            (ρ-1)*(μ_tilde_t['c'] - μ_0).T@Upsilon_0*H0[i]
+                    }, (1, n_X, n_W)) for i in range(len(HQ_loc_list))] 
+    adj = [lq_sum([lq1[i], lq2[i]]) for i in range(len(HQ_loc_list))]
+    adj_aug = {'xx':np.zeros([n_JX,n_X*n_X]),'x':np.zeros([n_JX,n_X]),'c':np.zeros([n_JX,1])}
+
+    for i in range(len(HQ_loc_list)):
+        adj_aug['xx'][HQ_loc_list[i]] = adj[i]['xx']
+        adj_aug['x'][HQ_loc_list[i]] = adj[i]['x']
+        adj_aug['c'][HQ_loc_list[i]] = adj[i]['c']
+        
+    return adj_aug
+
+def second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t, JX1_tp1, JX1_tp1_tilde, adj, var_shape):
+    """
+    Implements second-order expansion using approach 2.
+
+    """
+    n_J, n_X, n_W = var_shape
+    schur = schur_decomposition(-df['xtp1'], df['xt'], (n_J, n_X, n_W))
+
+    μ_0 = util_sol['μ_0']
+    Σ_tilde = util_sol['Σ_tilde']
+    Γ_tilde = util_sol['Γ_tilde']
+    μ_tilde_t = util_sol['μ_tilde_t']
+
+    Wtp1 = LinQuadVar({'w': Γ_tilde, 'c':μ_tilde_t['c'], 'x': μ_tilde_t['x']}, (n_W, n_X, n_W), False)
+    D2 = combine_second_order_terms(df, JX1_t, JX1_tp1_tilde, Wtp1)
+    D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
+    M_E_w = np.zeros([n_W,1])
+    cov_w = np.eye(n_W)
+    M_E_ww = cal_E_ww(M_E_w, cov_w)
+    E_D2 = E(D2, M_E_w, M_E_ww)
+    E_D2_coeff = np.block([[E_D2['c']+adj['c'], E_D2['x']+adj['x'], E_D2['xx']+adj['xx']]])
+    X1X1_tilde = kron_prod(X1_tp1_tilde, X1_tp1_tilde)
+    M_mat = form_M0(M_E_w, M_E_ww, X1_tp1_tilde, X1X1_tilde)
+    LHS = np.eye(n_J*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
+    RHS = vec(-np.linalg.solve(schur['Λ22'], (schur['Q'].T@E_D2_coeff)[-n_J:]))
+    D_tilde_vec = np.linalg.solve(LHS, RHS)
+    D_tilde = mat(D_tilde_vec, (n_J, 1+n_X+n_X**2))
+    G = np.linalg.solve(schur['Z21'], D_tilde)
+
+    ψ_x2 = X1_tp1['x']
+
+    def solve_second_state(X1_tp1, JX1_tp1, Wtp1):
+
+        D2 = combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1)
+        D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
+
+        X1X1 = kron_prod(X1_tp1, X1_tp1)
+        Y2_coeff = -df['xtp1'][n_J:]@schur['N_block']
+        C_hat = np.linalg.solve(Y2_coeff, D2_coeff[n_J:])
+        C_hat_coeff = np.split(C_hat, np.cumsum([1, n_X, n_W, n_X**2, n_X*n_W]),axis=1)
+        G_block = np.block([[G], [np.zeros((n_X, 1+n_X+n_X**2))]])
+        Gp_hat = np.linalg.solve(Y2_coeff, df['xtp1'][n_J:]@G_block)
+        G_hat = np.linalg.solve(Y2_coeff, df['xt'][n_J:]@G_block)
+        c_1, x_1, w_1, xx_1, xw_1, ww_1 = C_hat_coeff
+        c_2, x_2, xx_2 = np.split(G_hat, np.cumsum([1, n_X]), axis=1)
+        var = LinQuadVar({'c': Gp_hat[:, :1], 'x': Gp_hat[:, 1:1+n_X], 'xx': Gp_hat[:, 1+n_X:1+n_X+n_X**2]}, (n_X, n_X, n_W), False)
+        var_next = next_period(var, X1_tp1, None, X1X1)
+        
+        ψ_tilde_xx = var_next['xx'] + xx_1 + xx_2
+        ψ_tilde_xw = var_next['xw'] + xw_1
+        ψ_tilde_xq = var_next['x'] + x_1 + x_2
+        ψ_tilde_ww = var_next['ww'] + ww_1
+        ψ_tilde_wq = var_next['w'] + w_1
+        ψ_tilde_qq = var_next['c'] + c_1 + c_2
+
+        X2_tp1 = LinQuadVar({'x2': ψ_x2, 'xx': ψ_tilde_xx, 'xw': ψ_tilde_xw, 'ww': ψ_tilde_ww, 'x': ψ_tilde_xq, 'w': ψ_tilde_wq, 'c': ψ_tilde_qq}, (n_X, n_X, n_W), False)
+
+        return X2_tp1
+
+    Wtp1 = LinQuadVar({'w': Γ_tilde, 'c':μ_tilde_t['c'], 'x': μ_tilde_t['x']}, (n_W, n_X, n_W), False)
+    X2_tp1_tilde = solve_second_state(X1_tp1_tilde, JX1_tp1_tilde, Wtp1)
+
+    Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_X, n_W), False)
+    X2_tp1 = solve_second_state(X1_tp1, JX1_tp1, Wtp1)
+
+    J2_t = LinQuadVar({'x2': schur['N'], 'xx': G[:, 1+n_X:1+n_X+(n_X)**2], 'x': G[:, 1:1+n_X], 'c': G[:, :1]}, (n_J, n_X, n_W), False)
+    X2_t = LinQuadVar({'x2': np.eye(n_X)}, (n_X, n_X, n_W), False)
+    JX2_t = concat([J2_t, X2_t])
+    JX2_tp1 = next_period(JX2_t, X1_tp1, X2_tp1)
+    JX2_tp1_tilde = next_period(JX2_t, X1_tp1_tilde, X2_tp1_tilde)
+
+    return J2_t, JX2_t, JX2_tp1, JX2_tp1_tilde, X2_tp1, X2_tp1_tilde
+
 def schur_decomposition(df_tp1, df_t, var_shape):
     
     n_J, n_X, n_W = var_shape
@@ -350,7 +573,17 @@ def schur_decomposition(df_tp1, df_t, var_shape):
     Z22 = Z.T[-n_J:, n_J:]
     N = -np.linalg.solve(Z21, Z22)
     N_block = np.block([[N], [np.eye(n_X)]])
-    schur_decomposition = {'N':N,'N_block':N_block,'Λp':Λp,'Λ':Λ,'Q':Q,'Z':Z,'Λp22':Λp22,'Λ22':Λ22,'Z21':Z21,'Z22':Z22}
+    schur_decomposition = { 
+                        'N':N,
+                        'N_block':N_block,
+                        'Λp':Λp,
+                        'Λ':Λ,
+                        'Q':Q,
+                        'Z':Z,
+                        'Λp22':Λp22,
+                        'Λ22':Λ22,
+                        'Z21':Z21,
+                        'Z22':Z22}
     
     return schur_decomposition
 
@@ -436,13 +669,15 @@ def approximate_fun(fun, ss, var_shape, JX1_t, JX2_t, X1_tp1, X2_tp1, args, seco
         else:
             return fun_approx, fun_zero_order, fun_first_order
 
-def solve_utility(γ, β, ρ, ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun, tol = 1e-10):
+def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun, tol = 1e-10):
     """
     Solves continuation values and forms approximation of change of measure
 
     """
     _, n_X, n_W = var_shape
-
+    γ = args[0]
+    β = args[1]
+    ρ = args[2]
     gc_tp1_approx = approximate_fun(gc_tp1_fun, np.concatenate([np.zeros(1), ss]), (1, n_X, n_W), concat([LinQuadVar({'c':np.zeros([1,1])}, shape=(1,n_X,n_W)),JX1_t]), concat([LinQuadVar({'c':np.zeros([1,1])}, shape=(1,n_X,n_W)),JX2_t]), X1_tp1, X2_tp1, args)
 
     gc_tp1 = gc_tp1_approx[0]
@@ -474,7 +709,7 @@ def solve_utility(γ, β, ρ, ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t,
     vmr1_tp1 = vmc1_tp1 + gc1_tp1 - rmc1_t
     log_N0 = ((1-γ)*(vmc1_tp1 + gc1_tp1)-log_E_exp((1-γ)*(vmc1_tp1 + gc1_tp1)))
     μ_0 = log_N0['w'].T
-    Ew0 = μ_0
+    Ew0 = μ_0.copy()
     Eww0 = cal_E_ww(Ew0,np.eye(Ew0.shape[0]))
 
     def solve_vmc2_t(order2_init_coeffs):
@@ -487,13 +722,16 @@ def solve_utility(γ, β, ρ, ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t,
     if vmc2_t_sol['success'] ==False:
         print(vmc2_t_sol['message'])
     vmc2_t = return_order2_t(vmc2_t_sol['x'])
-    rmc2_t = E(next_period(vmc2_t, X1_tp1, X2_tp1) + gc2_tp1, Ew0,Eww0)
+    rmc2_t = E(next_period(vmc2_t, X1_tp1, X2_tp1) + gc2_tp1, Ew0, Eww0)
     vmc2_tp1 = next_period(vmc2_t, X1_tp1, X2_tp1)
     vmr2_tp1 = vmc2_tp1 + gc2_tp1 - rmc2_t
     log_N_tilde = (1-γ)*(vmc1_tp1+gc1_tp1 + 0.5*(vmc2_tp1+gc2_tp1))-log_E_exp((1-γ)*(vmc1_tp1+gc1_tp1 + 0.5*(vmc2_tp1+gc2_tp1)))
     Upsilon_2 = vmr2_tp1['ww'].reshape(n_W,n_W).T*2
     Upsilon_1 = vmr2_tp1['xw'].reshape((n_X,n_W)).T
     Upsilon_0 = vmr2_tp1['w'].T + (Upsilon_2@μ_0)
+    Σ_tilde = np.linalg.inv(np.eye(n_W)-0.5*Upsilon_2*(1-γ))
+    Γ_tilde = sp.linalg.sqrtm(Σ_tilde)
+    μ_tilde_t = LinQuadVar({'x':0.5*(1-γ)*Σ_tilde@Upsilon_1, 'c':(1-γ)*Σ_tilde@(1/(1-γ)*μ_0+0.5*(Upsilon_0-Upsilon_2@μ_0))},shape=(n_W,n_X,n_W))
 
     util_sol = {'μ_0': μ_0, 
                 'Upsilon_2': Upsilon_2, 
@@ -506,7 +744,10 @@ def solve_utility(γ, β, ρ, ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t,
                 'gc1_tp1': gc1_tp1,
                 'gc2_tp1': gc2_tp1,
                 'vmr1_tp1': vmr1_tp1, 
-                'vmr2_tp1': vmr2_tp1}
+                'vmr2_tp1': vmr2_tp1,
+                'Σ_tilde':Σ_tilde,
+                'Γ_tilde':Γ_tilde,
+                'μ_tilde_t':μ_tilde_t}
 
     return util_sol
 
@@ -518,74 +759,69 @@ class ModelSolution(dict):
     Attributes
     ----------
 
-    'X0_t' : LinQuadVar
+    X0_t : LinQuadVar
         State Variables zeroth order approximation, time t
-    'X1_t' : LinQuadVar
+    X1_t : LinQuadVar
         State Variables first order approximation, time t
-    'X2_t' : LinQuadVar
+    X2_t : LinQuadVar
         State Variables second order approximation, time t
-    'X1_tp1': LinQuadVar
+    X1_tp1 : LinQuadVar
         State Variables first order approximation, time t+1, original measure
-    'X2_tp1': LinQuadVar
+    X2_tp1 : LinQuadVar
         State Variables second order approximation, time t+1, original measure
-    'X1_tp1_tilde': LinQuadVar
+    X1_tp1_tilde : LinQuadVar
         State Variables first order approximation, time t+1, the distorted measure
-    'X2_tp1_tilde': LinQuadVar
+    X2_tp1_tilde : LinQuadVar
         State Variables second order approximation, time t+1, the distorted measure
-    'J0_t': LinQuadVar
+    J0_t : LinQuadVar
         Jump Variables zeroth order approximation, time t
-    'J1_t': LinQuadVar
+    J1_t : LinQuadVar
         Jump Variables first order approximation, time t
-    'J2_t': LinQuadVar
+    J2_t : LinQuadVar
         Jump Variables second order approximation, time t
-    'JX0_t': LinQuadVar
+    JX0_t : LinQuadVar
         Vector of Jump and State Variables zeroth order approximation, time t
-    'JX1_t': LinQuadVar
+    JX1_t : LinQuadVar
         Vector of Jump and State Variables first order approximation, time t
-    'JX2_t': LinQuadVar
+    JX2_t : LinQuadVar
         Vector of Jump and State Variables second order approximation, time t
-    'JX1_tp1': LinQuadVar
+    JX1_tp1 : LinQuadVar
         Vector of Jump and State Variables first order approximation, time t+1, original measure
-    'JX2_tp1': LinQuadVar
+    JX2_tp1 : LinQuadVar
         Vector of Jump and State Variables second order approximation, time t+1, original measure
-    'JX_t': LinQuadVar
+    JX_t : LinQuadVar
         Vector of Jump and State Variables approximation, time t
-    'JX_tp1': LinQuadVar
+    JX_tp1 : LinQuadVar
         Vector of Jump and State Variables approximation, time t+1, original measure
-    'JX1_tp1_tilde': LinQuadVar
+    JX1_tp1_tilde : LinQuadVar
         Vector of Jump and State Variables first order approximation, time t+1, the distorted measure
-    'JX2_tp1_tilde': LinQuadVar
+    JX2_tp1_tilde : LinQuadVar
         Vector of Jump and State Variables second order approximation, time t+1, the distorted measure
-    'util_sol': dict
+    util_sol : dict
         Solutions of the continuation values
-    'log_N0': LinQuadVar
+    log_N0 : LinQuadVar
         logN0_t+1 change of measure     
-    'log_N_tilde': LinQuadVar
+    log_N_tilde : LinQuadVar
         logNtilde_t+1 change of measure  
-    'vmr1_tp1': LinQuadVar
+    vmr1_tp1 : LinQuadVar
         First order approximation of log V_t+1 - log R_t = log V1_t+1 - log R1_t  
-    'vmr2_tp1': LinQuadVar
+    vmr2_tp1 : LinQuadVar
         Second order approximation of log V_t+1 - log R_t = log V2_t+1 - log R2_t  
-    'gc_tp1': LinQuadVar
+    gc_tp1 : LinQuadVar
         Approximation of consumption growth
-    'gc0_tp1': LinQuadVar
+    gc0_tp1 : LinQuadVar
         Zeroth order approximation of consumption growth
-    'gc1_tp1': LinQuadVar
+    gc1_tp1 : LinQuadVar
         First order approximation of consumption growth
-    'gc2_tp1': LinQuadVar
+    gc2_tp1 : LinQuadVar
         Second order approximation of consumption growth
-    nit : int
-        Number of iterations performed.
     second_order : bool
         If True, the solution is in second-order.
     var_shape : tuple of ints
-        (n_J, n_X, n_W). Number of endogenous variables, states and shocks
+        (n_J, n_X, n_W). Number of jump variables, states and shocks
         respectively.
     ss : (n_JX, ) ndarray
         Steady states.
-    message : str
-        Message from the solver.
-
     """
     def __getattr__(self, name):
         try:

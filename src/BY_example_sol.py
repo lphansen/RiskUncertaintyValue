@@ -18,10 +18,10 @@ from elasticity import exposure_elasticity, price_elasticity
 from lin_quad import LinQuadVar
 from lin_quad_util import next_period
 
-def eq_cond_BY(X_t, X_tp1, W_tp1, q, *args):
+def eq_cond_BY(X_t, X_tp1, W_tp1, q, mode, *args):
     
     # Parameters for the model
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     # Variables:
     q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
@@ -37,14 +37,11 @@ def eq_cond_BY(X_t, X_tp1, W_tp1, q, *args):
     psi2_1 =  anp.exp(pd_t)
 
     # State process
-    phi_1 = α * x_t + ϕ_e * σ_t * w1_tp1
-    phi_2 = σ_squared + ν_1 * (σ_t_squared - σ_squared) + σ_w * w2_tp1
-
-    phi_1_var = x_tp1
-    phi_2_var = σ_tp1_squared
+    phi_1 = α * x_t + ϕ_e * σ_t * w1_tp1 - x_tp1
+    phi_2 = σ_squared + ν_1 * (σ_t_squared - σ_squared) + σ_w * w2_tp1 - σ_tp1_squared
     
     if mode == 'eq_cond':
-        return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1_var - phi_1, phi_2_var - phi_2])
+        return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1, phi_2])
     elif mode == 'psi1':
         return np.array([psi1_1])
     elif mode == 'psi2':
@@ -54,7 +51,7 @@ def eq_cond_BY(X_t, X_tp1, W_tp1, q, *args):
     raise Exception
 
 def ss_func_BY(*args):
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     sdf = anp.exp(anp.log(β) - ρ*μ)
     X_0 = np.array([0, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
@@ -62,7 +59,7 @@ def ss_func_BY(*args):
 
 def gc_tp1_approx(X_t, X_tp1, W_tp1, q, *args):
     # Parameters for the model
-    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, mode = args
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     # Variables:
     q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
@@ -123,11 +120,12 @@ def solve_BY(ρ= 2./3):
     ss = ss_func_BY 
     var_shape = (1, 2, 4)
     gc_tp1_fun = gc_tp1_approx
-    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, 'eq_cond')
+    approach = '1'
+    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π)
     init_util = None
     iter_tol = 1e-8
     max_iter = 50
-    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, init_util, iter_tol, max_iter)
+    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, approach, init_util, iter_tol, max_iter)
 
     res = {'X1_tp1':ModelSol['X1_tp1'],\
             'X2_tp1':ModelSol['X2_tp1'],\
@@ -182,10 +180,11 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
     var_shape = (1, 2, 4)
     gc_tp1_fun = gc_tp1_approx
     args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, 'eq_cond')
+    approach = '1'
     init_util = None
     iter_tol = 1e-8
     max_iter = 50
-    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, init_util, iter_tol, max_iter)
+    ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, approach, init_util, iter_tol, max_iter)
 
     res = {'X1_tp1':ModelSol['X1_tp1'],\
             'X2_tp1':ModelSol['X2_tp1'],\
