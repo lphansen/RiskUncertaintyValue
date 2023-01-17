@@ -132,6 +132,10 @@ def solve_BY(ρ= 2./3):
             'log_N_tilde':ModelSol['log_N_tilde'],\
             'β':ModelSol['args'][1],\
             'ρ':ModelSol['args'][2],\
+            'vmc1_t':ModelSol['util_sol']['vmc1_t'],\
+            'vmc2_t':ModelSol['util_sol']['vmc2_t'],\
+            'rmc1_t':ModelSol['util_sol']['rmc1_t'],\
+            'rmc2_t':ModelSol['util_sol']['rmc2_t'],\
             'vmr1_tp1':ModelSol['vmr1_tp1'],\
             'vmr2_tp1':ModelSol['vmr2_tp1'],\
             'var_shape':ModelSol['var_shape'],\
@@ -179,7 +183,7 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
     ss = ss_func_BY 
     var_shape = (1, 2, 4)
     gc_tp1_fun = gc_tp1_approx
-    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π, 'eq_cond')
+    args = (γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π)
     approach = '1'
     init_util = None
     iter_tol = 1e-8
