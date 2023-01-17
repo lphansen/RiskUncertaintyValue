@@ -13,19 +13,19 @@ sns.set(font_scale = 1.5)
 import warnings
 warnings.filterwarnings("ignore")
 
-from uncertain_expansion import uncertain_expansion
+from uncertain_expansion import uncertain_expansion, approximate_fun
 from elasticity import exposure_elasticity, price_elasticity
 from lin_quad import LinQuadVar
 from lin_quad_util import next_period
 
-def eq_cond_BY(X_t, X_tp1, W_tp1, q, mode, *args):
+def eq_cond_BY(Var_t, Var_tp1, W_tp1, q, mode, *args):
     
     # Parameters for the model
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     # Variables:
-    q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
-    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
+    q_t, pd_t, x_t, σ_t_squared = Var_t.ravel()
+    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = Var_tp1.ravel()
     w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
 
     σ_t = anp.sqrt(σ_t_squared)
@@ -46,6 +46,7 @@ def eq_cond_BY(X_t, X_tp1, W_tp1, q, mode, *args):
         return np.array([psi2_1])
     elif mode == 'phi':
         return np.array([phi_1, phi_2])
+
     return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1, phi_2])
 
 def ss_func_BY(*args):
@@ -55,19 +56,34 @@ def ss_func_BY(*args):
     X_0 = np.array([0, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
     return X_0
 
-def gc_tp1_approx(X_t, X_tp1, W_tp1, q, *args):
+def gc_tp1_approx(Var_t, Var_tp1, W_tp1, q, *args):
     # Parameters for the model
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     # Variables:
-    q_t, pd_t, x_t, σ_t_squared = X_t.ravel()
-    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = X_tp1.ravel()
+    q_t, pd_t, x_t, σ_t_squared = Var_t.ravel()
+    q_tp1, pd_tp1, x_tp1, σ_tp1_squared = Var_tp1.ravel()
     w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
     σ_t = anp.sqrt(σ_t_squared)
     
     gc_tp1 = μ + x_t + ϕ_c*σ_t*w3_tp1
     
     return gc_tp1
+
+def gd_tp1_approx(Var_t, Var_tp1, W_tp1, q, *args):
+
+    # Parameters for the model
+    γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
+
+    # Variables:
+    pd_t, x_t, σ_t_squared = Var_t.ravel()
+    pd_tp1, x_tp1, σ_tp1_squared = Var_tp1.ravel()
+    w1_tp1, w2_tp1, w3_tp1, w4_tp1 = W_tp1.ravel()
+    σ_t = anp.sqrt(σ_t_squared)
+    
+    gd_tp1 = μ_d + ϕ*x_t + π*σ_t*w3_tp1 + ϕ_d*σ_t*w4_tp1
+    
+    return gd_tp1
 
 def calc_SDF(res):
 
@@ -114,6 +130,7 @@ def solve_BY(ρ= 2./3):
     ϕ_d = 4.5 * σ_original
     π = 0.0
 
+    # Solve BY model
     eq = eq_cond_BY
     ss = ss_func_BY 
     var_shape = (1, 2, 4)
@@ -124,6 +141,11 @@ def solve_BY(ρ= 2./3):
     iter_tol = 1e-8
     max_iter = 50
     ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc_tp1_fun, approach, init_util, iter_tol, max_iter)
+
+    # Approximate dividend growth process
+    n_J, n_X, n_W = var_shape
+    ss = ModelSol['ss']
+    gd_tp1_list = approximate_fun(gd_tp1_approx, ss, (1, n_X, n_W), ModelSol['JX1_t'], ModelSol['JX2_t'], ModelSol['X1_tp1'], ModelSol['X2_tp1'], args)
 
     res = {'X1_tp1':ModelSol['X1_tp1'],\
             'X2_tp1':ModelSol['X2_tp1'],\
@@ -140,7 +162,11 @@ def solve_BY(ρ= 2./3):
             'gc_tp1':ModelSol['gc_tp1'],\
             'gc0_tp1':ModelSol['gc0_tp1'],\
             'gc1_tp1':ModelSol['gc1_tp1'],\
-            'gc2_tp1':ModelSol['gc2_tp1']}
+            'gc2_tp1':ModelSol['gc2_tp1'],\
+            'gd_tp1':gd_tp1_list[0],\
+            'gd0_tp1':gd_tp1_list[1],\
+            'gd1_tp1':gd_tp1_list[2],\
+            'gd2_tp1':gd_tp1_list[3],}
 
     return res
 
