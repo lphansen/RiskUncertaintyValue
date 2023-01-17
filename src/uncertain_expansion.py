@@ -15,7 +15,7 @@ dynamic macro-finance models under uncertainty, based on the small-
 noise expansion method. These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Codes updated on Jan. 14, 2023, 11:23 A.M. CT
+Codes updated on Jan. 16, 2023, 9:08 P.M. CT
 Check and obtain the lastest version on 
 https://github.com/lphansen/RiskUncertaintyValue 
 '''
@@ -743,6 +743,10 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
                 'gc0_tp1': gc0_tp1,
                 'gc1_tp1': gc1_tp1,
                 'gc2_tp1': gc2_tp1,
+                'vmc1_t': vmc1_t,
+                'vmc2_t': vmc2_t,
+                'rmc1_t': rmc1_t,
+                'rmc2_t': rmc2_t,
                 'vmr1_tp1': vmr1_tp1, 
                 'vmr2_tp1': vmr2_tp1,
                 'Σ_tilde':Σ_tilde,
@@ -842,3 +846,82 @@ class ModelSolution(dict):
 
     def __dir__(self):
         return list(self.keys())    
+
+    def IRF(self, T, shock):
+        r"""
+        Computes impulse response functions for each component in X to each shock.
+
+        Parameters
+        ----------
+        T : int
+            Time horizon.
+        shock : int
+            Position of the initial shock, starting from 0.
+
+        Returns
+        -------
+        states : (T, n_Z) ndarray
+            IRF of all state variables to the designated shock.
+        controls : (T, n_Y) ndarray
+            IRF of all control variables to the designated shock.
+
+        """
+    
+        n_Y, n_Z, n_W = self.var_shape
+        # Build the first order impulse response for each of the shocks in the system
+        states1 = np.zeros((T, n_Z))
+        controls1 = np.zeros((T, n_Y))
+        
+        W_0 = np.zeros(n_W)
+        W_0[shock] = 1
+        B = self.JX1_tp1['w'][n_Y:,:]
+        F = self.JX1_tp1['w'][:n_Y,:]
+        A = self.JX1_tp1['x'][n_Y:,:]
+        D = self.JX1_tp1['x'][:n_Y,:]
+        N = self.JX1_t['x'][:n_Y,:]
+        states1[0, :] = B@W_0
+        controls1[0, :] = F@W_0
+        for i in range(1,T):
+            states1[i, :] = A@states1[i-1, :]
+            controls1[i, :] = D@states1[i-1, :]
+        if not self.second_order:
+            states = states1
+            controls = controls1
+        else:
+            # Define the evolutions of the states in second order
+            # X_{t+1}^2 = Ψ_0 + Ψ_1 @ X_t^1 + Ψ_2 @ W_{t+1} + Ψ_3 @ X_t^2 +
+            # Ψ_4 @ (X_t^1 ⊗ X_t^1) + Ψ_5 @ (X_t^1 ⊗ W_{t+1}) + Ψ_6 @ (W_{t+1} ⊗ W_{t+1})
+            Ψ_0 = self.JX2_tp1['c'][n_Y:,:]
+            Ψ_1 = self.JX2_tp1['x'][n_Y:,:]
+            Ψ_2 = self.JX2_tp1['w'][n_Y:,:]
+            Ψ_3 = self.JX2_tp1['x2'][n_Y:,:]
+            Ψ_4 = self.JX2_tp1['xx'][n_Y:,:]
+            Ψ_5 = self.JX2_tp1['xw'][n_Y:,:]
+            Ψ_6 = self.JX2_tp1['ww'][n_Y:,:]
+            
+            Φ_0 = self.JX2_tp1['c'][:n_Y,:]
+            Φ_1 = self.JX2_tp1['x'][:n_Y,:]
+            Φ_2 = self.JX2_tp1['w'][:n_Y,:]
+            Φ_3 = self.JX2_tp1['x2'][:n_Y,:]
+            Φ_4 = self.JX2_tp1['xx'][:n_Y,:]
+            Φ_5 = self.JX2_tp1['xw'][:n_Y,:]
+            Φ_6 = self.JX2_tp1['ww'][:n_Y,:]
+            
+            states2 = np.zeros((T, n_Z))
+            controls2 = np.zeros((T, n_Y))
+            X_1_0 = np.zeros(n_Z)
+
+            # Build the second order impulse response for each shock
+            W_0 = np.zeros(n_W)
+            W_0[shock] = 1
+            states2[0, :] = Ψ_2 @ W_0 + Ψ_5 @ np.kron(X_1_0, W_0) + Ψ_6 @ np.kron(W_0, W_0)
+            controls2[0, :] = Φ_2 @ W_0 + Φ_5 @ np.kron(X_1_0, W_0) + Φ_6 @ np.kron(W_0, W_0)
+            for i in range(1,T):
+                states2[i, :] = Ψ_1 @ states1[i-1, :] + Ψ_3 @ states2[i-1, :] + \
+                    Ψ_4 @ np.kron(states1[i-1, :], states1[i-1, :])
+                controls2[i, :] = Φ_1 @ states1[i-1, :] + Φ_3 @ states2[i-1, :] + \
+                    Φ_4 @ np.kron(states1[i-1, :], states1[i-1, :])
+            states = states1 + .5 * states2
+            controls = controls1 + .5 * controls2
+            
+        return states, controls
