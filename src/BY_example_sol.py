@@ -40,15 +40,13 @@ def eq_cond_BY(X_t, X_tp1, W_tp1, q, mode, *args):
     phi_1 = α * x_t + ϕ_e * σ_t * w1_tp1 - x_tp1
     phi_2 = σ_squared + ν_1 * (σ_t_squared - σ_squared) + σ_w * w2_tp1 - σ_tp1_squared
     
-    if mode == 'eq_cond':
-        return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1, phi_2])
-    elif mode == 'psi1':
+    if mode == 'psi1':
         return np.array([psi1_1])
     elif mode == 'psi2':
         return np.array([psi2_1])
     elif mode == 'phi':
         return np.array([phi_1, phi_2])
-    raise Exception
+    return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1, phi_2])
 
 def ss_func_BY(*args):
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
