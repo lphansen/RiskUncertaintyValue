@@ -4,7 +4,7 @@ import scipy as sp
 import seaborn as sns
 from scipy import optimize
 
-from lin_quad_util import E, cal_E_ww, matmul, concat, next_period, kron_prod, log_E_exp, lq_sum
+from lin_quad_util import E, cal_E_ww, matmul, concat, next_period, kron_prod, log_E_exp, lq_sum, simulate
 from utilities import mat, vec, sym, gschur
 from derivatives import compute_derivatives
 from lin_quad import LinQuadVar
@@ -15,7 +15,7 @@ dynamic macro-finance models under uncertainty, based on the small-
 noise expansion method. These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Codes updated on Jan. 16, 2023, 9:08 P.M. CT
+Codes updated on Jan. 19, 2023, 5:10 P.M. CT
 Check and obtain the lastest version on 
 https://github.com/lphansen/RiskUncertaintyValue 
 '''
@@ -588,7 +588,27 @@ def schur_decomposition(df_tp1, df_t, var_shape):
     return schur_decomposition
 
 def combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1):
+    """
+    This function combines terms from second-order f, except those for JX2_t
+    and JX2_{t+1}. 
 
+    Parameters
+    ----------
+    df : dict
+        Partial derivatives of f.
+    JX1_t : LinQuadVar
+        Vector of Jump and State Variables first order approximation, time t
+    JX1_tp1 : LinQuadVar
+        Vector of Jump and State Variables first order approximation, time t+1
+    W_tp1 : LinQuadVar
+        Vector of shocks
+
+    Returns
+    -------
+    res : LinQuadVar
+        Combined second-order terms (except JX2_t and JX2_{t+1}) from df.
+
+    """
     _, n_X, n_W = JX1_tp1.shape
 
     xtxt = kron_prod(JX1_t, JX1_t)
@@ -611,7 +631,10 @@ def combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1):
     return res
 
 def form_M0(M0_E_w, M0_E_ww, X1_tp1, X1X1):
+    """
+    Get M0_mat, which satisfies E[M0 A [1 ztp1 ztp1ztp1]] = A M0_mat[1 zt ztzt]
 
+    """
     _, n_X, n_W = X1_tp1.shape
     M0_mat_11 = np.eye(1)
     M0_mat_12 = np.zeros((1, n_X))
@@ -633,6 +656,49 @@ def approximate_fun(fun, ss, var_shape, JX1_t, JX2_t, X1_tp1, X2_tp1, args, seco
     """
     Approximates function given state evolutions and jump varibles
 
+    Parameters
+    ----------
+    fun : callable
+        Returns the variable to be approximated as a function of state and jump variables.
+    ss : callable
+        Steady states of state and jump variables 
+        If `Var_t` and `Var_tp1` contain `q_t` or `q_tp1`, the output of the steady state 
+        function needs to be augmented with a float 0 as the first component, which 
+        is the steady state of `q_t`.
+    var_shape : tuple of ints
+        (1, n_X, n_W)
+    JX1_t : LinQuadVar
+        Vector of first order expansion results for state and jump variables.
+    JX2_t : LinQuadVar
+        Vector of second order expansion results for state and jump variables.
+    X1_tp1 : LinQuadVar
+        Vector of first order expansion results for state evolution equations.
+    X2_tp1 : LinQuadVar
+        Vector of second order expansion results for state evolution equations.
+    args : tuple of floats/ndarray
+        Model parameters, the first three elements are fixed recursive 
+        utility parameters, γ, β, ρ
+    second_order : Boolean
+        If `True`, return approximated results, zeroth order, first order, and second 
+            order results.
+        If `False`, return approximated results, zeroth order, and first order results.
+    zeroth_order : Boolean
+        If `True`, return zeroth order approximated results.
+        If `False`, return results depend on the option of `second_order`.
+
+    Return
+    ----------
+    output: float / tuple
+        If `zeroth_order` is `True`: 
+            return zeroth order approximated result, float.
+        If `zeroth_order` is `False` and `second_order` is `False`: 
+            return a tuple containing approximated results, zeroth order, and first order 
+            results. Approximated results and first order results are LinQuadVar. Zeroth 
+            order approximated result is float.
+        If `zeroth_order` is `False` and `second_order` is `True`: 
+            return a tuple containing approximated results, zeroth order, first order, and
+            second order results. Approximated results, first order results, and second order
+            results are LinQuadVar. Zeroth order approximated result is float.
     """
     _, n_X, n_W = var_shape
     
@@ -673,6 +739,73 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     """
     Solves continuation values and forms approximation of change of measure
 
+    Parameters
+    ----------
+    ss : callable
+        Steady states of q_t, state and jump variables, 
+        The default input of the `Var_t` and `Var_tp1` in `gc_tp1_fun` include
+        `q_t` and `q_tp1`, the output of the steady state function is augmented 
+        with a float 0 as the first component, which is the steady state of q_t.
+    var_shape : tuple of ints
+        (n_J, n_X, n_W)
+    args : tuple of floats/ndarray
+        Model parameters, the first three elements are fixed recursive 
+        utility parameters, γ, β, ρ
+    X1_tp1 : LinQuadVar
+        Vector of first order expansion results for state evolution equations.
+    X2_tp1 : LinQuadVar
+        Vector of second order expansion results for state evolution equations.
+    JX1_t : LinQuadVar
+        Vector of first order expansion results for state and jump variables.
+    JX2_t : LinQuadVar
+        Vector of second order expansion results for state and jump variables.
+    gc_tp1_fun : callable
+        Returns the consumption growth as a function of state and jump variables.
+    tol : float
+        The tolerance for the eqution solver.
+    
+    Return
+    ----------
+    util_sol : dict
+        A dictionary contains solved continuation values.
+        μ_0 : ndarray
+            The mean of shock under the change of measure N0_{t+1}
+        Upsilon_2 : ndarray
+            Transformed `ww` coeffients of V2_{t+1}-R2_{t}
+        Upsilon_1 : ndarray
+            Transformed `xw` coeffients of V2_{t+1}-R2_{t}
+        Upsilon_0 : ndarray
+            Transformed `w` coeffients of V2_{t+1}-R2_{t}
+        log_N0 : LinQuadVar
+            Log Change of measure N0_{t+1}
+        log_N_tilde : LinQuadVar
+            Log Change of measure N_{t+1}_tilde
+        gc_tp1 : LinQuadVar
+            Log growth of consumption
+        gc0_tp1 : LinQuadVar
+            Zeroth order expansion of log growth of consumption
+        gc1_tp1 : LinQuadVar
+            First order expansion of log growth of consumption
+        gc2_tp1 : LinQuadVar
+            Second order expansion of log growth of consumption
+        vmc1_t : LinQuadVar
+            First order expansion of V_{t}-C_{t}
+        vmc2_t : LinQuadVar
+            Second order expansion of V_{t}-C_{t}
+        rmc1_t : LinQuadVar
+            First order expansion of R_{t}-C_{t}
+        rmc2_t : LinQuadVar
+            Second order expansion of R_{t}-C_{t}
+        vmr1_tp1 : LinQuadVar
+            First order expansion of V_{t+1}-R_{t}
+        vmr2_tp1 : LinQuadVar
+            Second order expansion of V_{t+1}-R_{t}
+        Σ_tilde : ndarray
+            The covariance matrix of shock under the change of measure N_{t+1}_tilde
+        Γ_tilde : ndarray
+            The covariance matrix square root of shock under the change of measure N_{t+1}_tilde
+        μ_tilde_t : LinQuadVar
+            The mean of shock under the change of measure N_{t+1}_tilde
     """
     _, n_X, n_W = var_shape
     γ = args[0]
@@ -695,6 +828,7 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     λ = β * np.exp((1-ρ) * gc0_tp1)
     
     def solve_vmc1_t(order1_init_coeffs):
+
         vmc1_t = return_order1_t(order1_init_coeffs)
         LHS = λ/(1-γ) *log_E_exp((1-γ)*(next_period(vmc1_t,X1_tp1)+gc1_tp1))
         LHS_list = [LHS['c'].item()]+ [i for i in LHS['x'][0]] 
@@ -713,6 +847,7 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     Eww0 = cal_E_ww(Ew0,np.eye(Ew0.shape[0]))
 
     def solve_vmc2_t(order2_init_coeffs):
+
         vmc2_t = return_order2_t(order2_init_coeffs)
         LHS = λ *E(next_period(vmc2_t, X1_tp1, X2_tp1) + gc2_tp1, Ew0, Eww0) + (1-ρ)*(1-λ)/λ*kron_prod(vmc1_t,vmc1_t)
         LHS_list = [LHS['c'].item()]+ [i for i in LHS['x'][0]] + [i for i in LHS['x2'][0]] + [i for i in LHS['xx'][0]] 
@@ -847,9 +982,36 @@ class ModelSolution(dict):
     def __dir__(self):
         return list(self.keys())    
 
+    def simulate(self, Ws):
+        """
+        Simulates stochastiic path for JX by generating iid normal shocks,
+        or deterministic path for JX by generating zero-valued shocks.
+
+        Parameters
+        ----------
+        Ws : (T, n_W) ndarray
+            n_W dimensional shocks for T periods to be fed into the system.        
+        T : int
+            Time horizon.
+
+        Returns
+        -------
+        sim_result : (T, n_J) ndarray
+            Simulated Ys.
+
+        """
+        n_J, n_X, n_W = self.var_shape
+
+        sim_result = simulate(self.JX_t,
+                              self.X1_tp1,
+                              self.X2_tp1,
+                              Ws)
+
+        return sim_result
+
     def IRF(self, T, shock):
-        r"""
-        Computes impulse response functions for each component in X to each shock.
+        """
+        Computes impulse response functions for each component in JX to each shock.
 
         Parameters
         ----------
@@ -860,25 +1022,25 @@ class ModelSolution(dict):
 
         Returns
         -------
-        states : (T, n_Z) ndarray
+        states : (T, n_X) ndarray
             IRF of all state variables to the designated shock.
-        controls : (T, n_Y) ndarray
+        controls : (T, n_J) ndarray
             IRF of all control variables to the designated shock.
 
         """
     
-        n_Y, n_Z, n_W = self.var_shape
+        n_J, n_X, n_W = self.var_shape
         # Build the first order impulse response for each of the shocks in the system
-        states1 = np.zeros((T, n_Z))
-        controls1 = np.zeros((T, n_Y))
+        states1 = np.zeros((T, n_X))
+        controls1 = np.zeros((T, n_J))
         
         W_0 = np.zeros(n_W)
         W_0[shock] = 1
-        B = self.JX1_tp1['w'][n_Y:,:]
-        F = self.JX1_tp1['w'][:n_Y,:]
-        A = self.JX1_tp1['x'][n_Y:,:]
-        D = self.JX1_tp1['x'][:n_Y,:]
-        N = self.JX1_t['x'][:n_Y,:]
+        B = self.JX1_tp1['w'][n_J:,:]
+        F = self.JX1_tp1['w'][:n_J,:]
+        A = self.JX1_tp1['x'][n_J:,:]
+        D = self.JX1_tp1['x'][:n_J,:]
+        N = self.JX1_t['x'][:n_J,:]
         states1[0, :] = B@W_0
         controls1[0, :] = F@W_0
         for i in range(1,T):
@@ -891,25 +1053,25 @@ class ModelSolution(dict):
             # Define the evolutions of the states in second order
             # X_{t+1}^2 = Ψ_0 + Ψ_1 @ X_t^1 + Ψ_2 @ W_{t+1} + Ψ_3 @ X_t^2 +
             # Ψ_4 @ (X_t^1 ⊗ X_t^1) + Ψ_5 @ (X_t^1 ⊗ W_{t+1}) + Ψ_6 @ (W_{t+1} ⊗ W_{t+1})
-            Ψ_0 = self.JX2_tp1['c'][n_Y:,:]
-            Ψ_1 = self.JX2_tp1['x'][n_Y:,:]
-            Ψ_2 = self.JX2_tp1['w'][n_Y:,:]
-            Ψ_3 = self.JX2_tp1['x2'][n_Y:,:]
-            Ψ_4 = self.JX2_tp1['xx'][n_Y:,:]
-            Ψ_5 = self.JX2_tp1['xw'][n_Y:,:]
-            Ψ_6 = self.JX2_tp1['ww'][n_Y:,:]
+            Ψ_0 = self.JX2_tp1['c'][n_J:,:]
+            Ψ_1 = self.JX2_tp1['x'][n_J:,:]
+            Ψ_2 = self.JX2_tp1['w'][n_J:,:]
+            Ψ_3 = self.JX2_tp1['x2'][n_J:,:]
+            Ψ_4 = self.JX2_tp1['xx'][n_J:,:]
+            Ψ_5 = self.JX2_tp1['xw'][n_J:,:]
+            Ψ_6 = self.JX2_tp1['ww'][n_J:,:]
             
-            Φ_0 = self.JX2_tp1['c'][:n_Y,:]
-            Φ_1 = self.JX2_tp1['x'][:n_Y,:]
-            Φ_2 = self.JX2_tp1['w'][:n_Y,:]
-            Φ_3 = self.JX2_tp1['x2'][:n_Y,:]
-            Φ_4 = self.JX2_tp1['xx'][:n_Y,:]
-            Φ_5 = self.JX2_tp1['xw'][:n_Y,:]
-            Φ_6 = self.JX2_tp1['ww'][:n_Y,:]
+            Φ_0 = self.JX2_tp1['c'][:n_J,:]
+            Φ_1 = self.JX2_tp1['x'][:n_J,:]
+            Φ_2 = self.JX2_tp1['w'][:n_J,:]
+            Φ_3 = self.JX2_tp1['x2'][:n_J,:]
+            Φ_4 = self.JX2_tp1['xx'][:n_J,:]
+            Φ_5 = self.JX2_tp1['xw'][:n_J,:]
+            Φ_6 = self.JX2_tp1['ww'][:n_J,:]
             
-            states2 = np.zeros((T, n_Z))
-            controls2 = np.zeros((T, n_Y))
-            X_1_0 = np.zeros(n_Z)
+            states2 = np.zeros((T, n_X))
+            controls2 = np.zeros((T, n_J))
+            X_1_0 = np.zeros(n_X)
 
             # Build the second order impulse response for each shock
             W_0 = np.zeros(n_W)
@@ -925,3 +1087,6 @@ class ModelSolution(dict):
             controls = controls1 + .5 * controls2
             
         return states, controls
+
+    
+    
