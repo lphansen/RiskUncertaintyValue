@@ -1,6 +1,6 @@
 # Risk Uncertainty Value
 
-`Expansion Suite` is a Python toolbox for macro-finance research. It solves nonlinear DSGE model with recursive utility formulation motivated by robustness or risk concerns based on the small-noise expansion method.
+`Expansion Suite` is an open source Python toolbox for macro-finance research. It solves nonlinear DSGE model with recursive utility formulation motivated by robustness or risk concerns based on the small-noise expansion method.
 
 
 
