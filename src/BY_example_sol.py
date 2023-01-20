@@ -8,6 +8,7 @@ import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+from IPython.display import display, HTML, Math
 pd.options.display.float_format = '{:.3g}'.format
 sns.set(font_scale = 1.5)
 import warnings
@@ -19,7 +20,7 @@ from lin_quad import LinQuadVar
 from lin_quad_util import next_period
 
 def eq_cond_BY(Var_t, Var_tp1, W_tp1, q, mode, *args):
-    
+
     # Parameters for the model
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
@@ -33,7 +34,6 @@ def eq_cond_BY(Var_t, Var_tp1, W_tp1, q, mode, *args):
     gd_tp1 = μ_d + ϕ*x_t + π*σ_t*w3_tp1 + ϕ_d*σ_t*w4_tp1
     
     psi1_1 = anp.exp(anp.log(β)- ρ*gc_tp1 + gd_tp1)*(anp.exp(pd_tp1) + 1)
-
     psi2_1 =  anp.exp(pd_t)
 
     # State process
@@ -50,13 +50,16 @@ def eq_cond_BY(Var_t, Var_tp1, W_tp1, q, mode, *args):
     return anp.array([psi1_1*anp.exp(q_tp1) - psi2_1, phi_1, phi_2])
 
 def ss_func_BY(*args):
+
+    # Parameters for the model
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
     sdf = anp.exp(anp.log(β) - ρ*μ)
-    X_0 = np.array([0, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
-    return X_0
+
+    return np.array([0, np.log((sdf * np.exp(μ_d))/(1-np.exp(μ_d)*sdf)), 0., σ_squared])
 
 def gc_tp1_approx(Var_t, Var_tp1, W_tp1, q, *args):
+
     # Parameters for the model
     γ, β, ρ, α, ϕ_e, σ_squared, ν_1, σ_w, μ, μ_d, ϕ, ϕ_d, ϕ_c, π = args
 
@@ -147,7 +150,8 @@ def solve_BY(ρ= 2./3):
     ss = ModelSol['ss']
     gd_tp1_list = approximate_fun(gd_tp1_approx, ss, (1, n_X, n_W), ModelSol['JX1_t'], ModelSol['JX2_t'], ModelSol['X1_tp1'], ModelSol['X2_tp1'], args)
 
-    res = {'X1_tp1':ModelSol['X1_tp1'],\
+    res = {'JX_tp1':ModelSol['JX_tp1'],\
+           'X1_tp1':ModelSol['X1_tp1'],\
             'X2_tp1':ModelSol['X2_tp1'],\
             'log_N_tilde':ModelSol['log_N_tilde'],\
             'β':ModelSol['args'][1],\
@@ -284,4 +288,19 @@ def solve_BY_elas(γ=10, β=.998, ρ=2./3, α = 0.979, ϕ_e = 0.044*0.0078, ν_1
     print('ϕ_c = '+str("{:.4g}".format(ϕ_c)))
     plt.show()
 
-    # return expo_elas_shock_0, expo_elas_shock_1, expo_elas_shock_2, price_elas_shock_0, price_elas_shock_1, price_elas_shock_2
+def disp(Lq, Var):
+    '''
+    Display Linquad in Latex analytical form
+    '''
+    Lq_disp = {'c': r'{:.4g}'.format(*Lq['c'].flatten().tolist()),\
+    'x': r'\begin{{bmatrix}}{:.4g}&{:.4g}\end{{bmatrix}}X_t^1'.format(*Lq['x'].flatten().tolist()),\
+    'w':r'\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['w'].flatten().tolist()),\
+    'x2':r'\begin{{bmatrix}}{:.4g}&{:.4g}\end{{bmatrix}}X_t^2'.format(*Lq['x2'].flatten().tolist()),\
+    'xx':r'X^{{1T}}_{{t}}\begin{{bmatrix}}{:.4g}&{:.4g}\\{:.4g}&{:.4g}\end{{bmatrix}}X^1_{{t}}'.format(*Lq['xx'].flatten().tolist()),\
+    'xw':r'X^{{1T}}_{{t}}\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['xw'].flatten().tolist()),\
+    'ww':r'W_{{t+1}}^{{T}}\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['ww'].flatten().tolist())}
+    if (abs(Lq['c'].item())<1e-14) and abs(Lq['c'].item())!=0:
+        Lq_disp.pop('c')
+        Lq.coeffs.pop('c')
+    Lq_disp = Var + '='+ '+'.join([Lq_disp[i] for i in ['c','x','w','x2','xx','xw','ww'] if i in Lq.coeffs])
+    display(Math(Lq_disp))
