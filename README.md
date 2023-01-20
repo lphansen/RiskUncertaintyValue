@@ -24,7 +24,7 @@
 
 [src/quickguide.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/quickguide.ipynb)
 
-- Provides a quick guide to solve the DSGE model using the expansion suite, as well as how to compute IRF, approximate, and simulate variables.
+- Provides a quick guide to solve the DSGE model using the expansion suite, as well as how to compute IRF, approximate, and simulate variables. It takes the Bansal Yaron Long-run Risk Model used in the [shockelasticity.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/shockelasticity.ipynb) as an example.
 - Provides some examples for `LinQuadVar` computations
 
 ## Source Files
