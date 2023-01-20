@@ -22,11 +22,6 @@
 
 - An example of the Bansal Yaron Long-run Risk Model is provided in the notebook.
 
-[src/quickguide.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/quickguide.ipynb)
-
-- Provides a quick guide to solve the DSGE model using the expansion suite, as well as how to compute IRF, approximate, and simulate variables.
-- Provides some examples for `LinQuadVar` computations
-
 ## Source Files
 
 [lin_quad.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/lin_quad.py)
