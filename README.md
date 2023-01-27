@@ -51,17 +51,36 @@
 - Functions to compute shock elasticities.
 
 [BY_example_sol.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/BY_example_sol.py)
+
 - Produce the solutions for the Bansal Yaron Long-run Risk Model used in the [shockelasticity.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/shockelasticity.ipynb).
 
 
 
-## Recent Updates, by Jan. 26, 11.47 P.M. CT
+## Recent Updates, by Jan. 27, 00:12, CT
 
 1. [uncertainexpansion.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/uncertainexpansion.ipynb)
    - remove `gb_tp1` as a state variable
-   - parameter updating for the adjustment cost 
+   
+   - parameters updating for the adjustment cost model example, which are consistent with the homework.
+   
+     - Note the $\gamma=1$ cannot be solved by the `Expansion Suite`, the reason is that $1-\gamma$ will show in denominators of the recursive utility adjustment terms, we can try to use values close to $1$, `γ=1+1e-5`, for example.
+   
+     ```python
+     γ = 10.
+     ρ = 4./3
+     β = np.exp(-0.0025)
+     a = 0.0288
+     ϕ_2 = 88.
+     ϕ_1 = 1/ϕ_2
+     α_k = 0.0088
+     σ_k = np.array([[0.477],[0]]) * 0.01
+     A = np.exp(-0.014)
+     B = np.array([[0.011,0.025]]) * 0.01
+     ```
+   
 2. [uncertain_expansion.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/uncertain_expansion.py), [lin_quad_util.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/lin_quad_util.py), [BY_example_sol.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/BY_example_sol.py)
    - New functions and methods added
+   
 3. [quickguide.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/quickguide.ipynb)
    - New notebook added
    - Section 1 is a five-minute guide for the `Expansion Suite` as a DSGE solver. 
