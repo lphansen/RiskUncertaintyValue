@@ -11,7 +11,6 @@ from numba import njit
 from numba import prange
 import scipy as sp
 import seaborn as sns
-from copy import deepcopy
 import time
 
 def previous_period(Y, X1_tp1, X2_tp1=None):
@@ -266,7 +265,7 @@ def E(Y, E_w, E_ww=None):
         return E_Y
         
 def N_tilde_measure(log_N, var_shape):
-    r"""
+    """
     Computes the distored distribution of shocks implied by the change of measure N_tilde
 
     Parameters
