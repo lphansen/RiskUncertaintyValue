@@ -5,9 +5,10 @@ import seaborn as sns
 from scipy import optimize
 
 from lin_quad_util import E, cal_E_ww, matmul, concat, next_period, kron_prod, log_E_exp, lq_sum, simulate
-from utilities import mat, vec, sym, gschur
+from utilities import mat, vec, gschur
 from derivatives import compute_derivatives
 from lin_quad import LinQuadVar
+from elasticity import exposure_elasticity, price_elasticity
 
 '''
 This Python script provides functions to solve for the discrete-time 
@@ -15,7 +16,7 @@ dynamic macro-finance models under uncertainty, based on the small-
 noise expansion method. These models feature EZ recursive preferences.
 
 Developed and maintained by the MFR research team.
-Codes updated on Jan. 19, 2023, 5:10 P.M. CT
+Codes updated on Jan. 26, 2023, 11:34 P.M. CT
 Check and obtain the lastest version on 
 https://github.com/lphansen/RiskUncertaintyValue 
 '''
@@ -69,6 +70,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util =
             Recursive Utility' notes.
         '2': Solve the system using the approach 2 shown in 'Exploring 
             Recursive Utility' notes.
+        Reference : https://larspeterhansen.org/class-notes/
     init_util: dict
         Initialization of $mu^0, Upsilon^2_0, Upsilon^2_1,$ and $Upsilon^2_2$. 
         Users may provide a dictionary that maps the keys `mu_0`, `Upsilon_0`, 
@@ -1008,6 +1010,114 @@ class ModelSolution(dict):
                               Ws)
 
         return sim_result
+
+    def approximate(self, fun, args=()):
+        """
+        Approximates function given state evolutions and jump varibles
+
+        Parameters
+        ----------
+        fun : callable
+            Returns the variable to be approximated as a function of state and jump variables.
+        args : tuple of floats/ndarray
+            Model parameters, the first three elements are fixed recursive 
+            utility parameters, γ, β, ρ
+
+        Return
+        ----------
+        output: tuple
+            return a tuple containing approximated results, zeroth order, first order, and
+            second order results. Approximated results, first order results, and second order
+            results are LinQuadVar. Zeroth order approximated result is float.
+        """
+
+        _, n_X, n_W = self.var_shape
+    
+        W_0 = np.zeros(n_W)
+        q_0 = 0.
+        
+        dfun = compute_derivatives(f=lambda JX_t, JX_tp1, W_tp1, q:
+                                    anp.atleast_1d(fun(JX_t, JX_tp1, W_tp1, q, *args)),
+                                    X=[self.ss, self.ss, W_0, q_0],
+                                    second_order=True)
+        
+        fun_zero_order = fun(self.ss, self.ss, W_0, q_0, *args)
+        JX1_tp1 = next_period(self.JX1_t, self.X1_tp1)
+        fun_first_order = matmul(dfun['xtp1'], JX1_tp1)\
+            + matmul(dfun['xt'], self.JX1_t)\
+            + LinQuadVar({'w': dfun['wtp1'], 'c': dfun['q'].reshape(-1, 1)},
+                        (1, n_X, n_W), False)
+        fun_approx = fun_zero_order + fun_first_order
+
+        JX2_tp1 = next_period(self.JX2_t, self.X1_tp1, self.X2_tp1)
+        Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_X, n_W), False)
+
+        temp1 = combine_second_order_terms(dfun, self.JX1_t, JX1_tp1, Wtp1)
+        temp2 = matmul(dfun['xt'], self.JX2_t)\
+            + matmul(dfun['xtp1'], JX2_tp1)
+        fun_second_order = temp1 + temp2
+        fun_approx = fun_approx + fun_second_order*0.5
+
+        return fun_approx, fun_zero_order, fun_first_order, fun_second_order
+
+    def elasticities(self, log_SDF_ex, args=None, locs=None, T=400, shock=0, percentile=0.5):
+        """
+        Computes shock exposure and price elasticities for JX.
+
+        Parameters
+        ----------
+        log_SDF_ex : callable
+            Log stochastic discount factor exclusive of the
+            change of measure N and Q.
+
+            ``log_SDF_ex(X_t, X_tp1, W_tp1, q, *args) -> scalar``
+        args : tuple of floats/ints
+            Additional parameters passed to log_SDF_ex.
+        locs : None or tuple of ints
+            Positions of variables of interest.
+            If None, all variables will be selected.
+        T : int
+            Time horizon.
+        shock : int
+            Position of the initial shock, starting from 0.
+        percentile : float
+            Specifies the percentile of the elasticities.
+
+        Returns
+        -------
+        elasticities : (T, n_J) ndarray
+            Elasticities for M.
+
+        """
+        n_J, n_X, n_W = self.var_shape
+        if args == None:
+            args = self.args 
+        log_SDF_ex = self.approximate(log_SDF_ex, args)
+        ρ = args[2]
+        self.log_SDF = log_SDF_ex[0] + (ρ-1)*self.util_sol['vmr1_tp1'] + 0.5*(ρ-1)*self.util_sol['vmr2_tp1']+self.log_N_tilde
+        JX_growth = self.JX_tp1 - self.JX_t
+        JX_growth_list = JX_growth.split()
+        if locs is not None:
+            JX_growth_list = [JX_growth_list[i] for i in locs]
+        exposure_all = np.zeros((T, len(JX_growth_list)))
+        price_all = np.zeros((T, len(JX_growth_list)))
+        for i, x in enumerate(JX_growth_list):
+            exposure = exposure_elasticity(x,
+                                           self.JX1_tp1[n_J: n_J+n_X],
+                                           self.JX2_tp1[n_J: n_J+n_X],
+                                           T,
+                                           shock,
+                                           percentile)
+            price = price_elasticity(x,
+                                     self.log_SDF,
+                                     self.JX1_tp1[n_J: n_J+n_X],
+                                     self.JX2_tp1[n_J: n_J+n_X],
+                                     T,
+                                     shock,
+                                     percentile)
+            exposure_all[:, i] = exposure.reshape(-1)
+            price_all[:, i] = price.reshape(-1)
+        return exposure_all, price_all
 
     def IRF(self, T, shock):
         """
