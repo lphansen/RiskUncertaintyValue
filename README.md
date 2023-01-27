@@ -33,6 +33,8 @@ We look forward to your comments and appreciate your feedback!
   - approximate and simulate variables based on model solutions. 
 - Provides some examples for `LinQuadVar` computations
 
+
+
 ## Source Files
 
 [lin_quad.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/lin_quad.py)
@@ -60,7 +62,9 @@ We look forward to your comments and appreciate your feedback!
 
 
 
-## Installation and Usage (Testing)
+## Installation and Usage
+
+We can directly download the whole GitHub repo to use the `Expansion Suite`. We can also use all functions in the  `Expansion Suite` from a Python package.
 
 One line code
 
@@ -74,14 +78,29 @@ Upgrade with one line code
 pip install --upgrade mfrpy
 ```
 
-We can solve the nonlinear DSGE model with `uncertain_expansion` provided
+After installation, we can import the modules and functions from `mfrpy` in the Jupyter notebook.
 
 ```python
-import mfrpy as mp
-ModelSol = mp.uncertain_expansion(eq, ss, var_shape, args, gc)
+from mfrpy.uncertain_expansion import uncertain_expansion
+from mfrpy.elasticity import exposure_elasticity, price_elasticity
+from mfrpy.lin_quad import LinQuadVar
 ```
 
+For example, we can solve the nonlinear DSGE model with `uncertain_expansion` as shown in the notebook using five inputs
 
+```
+ModelSol = uncertain_expansion(eq, ss, var_shape, args, gc)
+```
+
+We can use the `exposure_elasticity` , `price_elasticity` to calcalute the shock elasticities of the variables we are interested in. We can also compute the shock elasticties for all jump and state variables in the model using the method `elasticities` defined in the `ModelSolution` class.
+
+```python
+expo_elas = exposure_elasticity(log_M_growth, X1_tp1, X2_tp1, T=400, shock=0)
+price_elas = price_elasticity(log_G_growth, log_S_growth, X1_tp1, X2_tp1, T=400, shock=0)
+expo_elas, price_elas = ModelSol.elasticities(log_SDF_ex, T=400, shock=0)
+```
+
+ 
 
 ## Recent Updates, by Jan. 27, 00:12, CT
 
