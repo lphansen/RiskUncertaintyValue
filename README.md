@@ -47,6 +47,7 @@
 - Functions to compute numerical derivatives used in the expansion solver.
 
 [uncertain_expansion.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/uncertain_expansion.py)
+
 - Functions to implement first and second order expansion, approximate the continuation values, change of probability measure, and iteration schemes.
 
 [elasticity.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/elasticity.py)
@@ -57,7 +58,17 @@
 
 
 
+## Recent Updates, by Jan. 26, 11.47 P.M. CT
 
+1. [uncertainexpansion.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/uncertainexpansion.ipynb)
+   - remove `gb_tp1` as a state variable
+   - parameter updating for the adjustment cost 
+2. [uncertain_expansion.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/uncertain_expansion.py), [lin_quad_util.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/lin_quad_util.py), [BY_example_sol.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/BY_example_sol.py)
+   - New functions and methods added
+3. [quickguide.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/quickguide.ipynb)
+   - New notebook added
+   - Section 1 is a five-minute guide for the `Expansion Suite` as a DSGE solver. 
+   - Section 2 are examples for the computations in `LinQuadVar`.
 
 
 
