@@ -8,6 +8,10 @@
 
 
 
+We look forward to your comments and appreciate your feedback!
+
+
+
 ## Jupyter Notebook Illustrations
 
 [uncertainexpansion.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/uncertainexpansion.ipynb)
@@ -56,15 +60,38 @@
 
 
 
+## Installation and Usage (Testing)
+
+One line code
+
+```python
+pip install mfrpy
+```
+
+Upgrade with one line code
+
+```python
+pip install --upgrade mfrpy
+```
+
+We can solve the nonlinear DSGE model with `uncertain_expansion` provided
+
+```python
+import mfrpy as mp
+ModelSol = mp.uncertain_expansion(eq, ss, var_shape, args, gc)
+```
+
+
+
 ## Recent Updates, by Jan. 27, 00:12, CT
 
 1. [uncertainexpansion.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/uncertainexpansion.ipynb)
    - remove `gb_tp1` as a state variable
-   
+
    - parameters updating for the adjustment cost model example, which are consistent with the homework.
-   
+
      - Note the $\gamma=1$ cannot be solved by the `Expansion Suite`, the reason is that $1-\gamma$ will show in denominators of the recursive utility adjustment terms, we can try to use values close to $1$, `γ=1+1e-5`, for example.
-   
+
      ```python
      γ = 10.
      ρ = 4./3
@@ -77,16 +104,14 @@
      A = np.exp(-0.014)
      B = np.array([[0.011,0.025]]) * 0.01
      ```
-   
+
 2. [uncertain_expansion.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/uncertain_expansion.py), [lin_quad_util.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/lin_quad_util.py), [BY_example_sol.py](https://github.com/lphansen/RiskUncertaintyValue/blob/main/src/BY_example_sol.py)
    - New functions and methods added
-   
+
 3. [quickguide.ipynb](https://github.com/lphansen/RiskUncertaintyValue/blob/main/quickguide.ipynb)
    - New notebook added
    - Section 1 is a five-minute guide for the `Expansion Suite` as a DSGE solver. 
    - Section 2 are examples for the computations in `LinQuadVar`.
-
-
 
 
 
