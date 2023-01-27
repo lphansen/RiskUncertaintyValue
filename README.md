@@ -27,7 +27,7 @@
 - Provides a five-minute guide to solve the DSGE model using the expansion suite, as well as how to 
   - compute shock elasticities and IRF
   - approximate and simulate variables based on model solutions. 
-- Provides some examples for `LinQuadVar` computations
+- Provides some examples for `LinQuadVar` computations, including
   - constructions, operations, and evaluatations
   - adjusting time periods
   - computing expectations
