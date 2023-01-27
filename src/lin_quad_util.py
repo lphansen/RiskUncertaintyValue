@@ -9,6 +9,8 @@ from utilities import vec, mat, sym, cal_E_ww
 from lin_quad import LinQuadVar
 from numba import njit
 from numba import prange
+import scipy as sp
+import seaborn as sns
 from copy import deepcopy
 import time
 
@@ -162,7 +164,9 @@ def lq_sum(lq_list):
     lq_list: a list of LinQuadVar
 
     Returns
+    ----------
     lq_sum : LinQuadVar
+        sum of a list of LinQuadVar.
 
     """
     lq_sum = LinQuadVar({'c':np.zeros([lq_list[0].shape[0],1])},lq_list[0].shape)
@@ -227,15 +231,22 @@ def concat(Y_list):
 def E(Y, E_w, E_ww=None):
     r"""
     Computes :math:`E[Y_{t+1} \mid \mathfrak{F}_t]`,
+    The expecation calculated in this function does not have the state dependent terms 
+
     Parameters
     ----------
     Y : LinQuadVar
+        The LinQuadVar to be taken expectation
     E_w : (n_W, 1) ndarray
-    Cov_w : (n_W, n_W) ndarray
+        Expectation of the shock vector.
+    E_ww : (n_W, n_W) ndarray
+        Expectation of the kronecker product of shock vectors.
         Used when the Y has non-zero coefficient on 'ww' term.
+
     Returns
     -------
     E_Y : LinQuadVar
+        Expectation of Y
     """
     n_Y, n_X, n_W = Y.shape
     if Y.deterministic:
@@ -253,6 +264,96 @@ def E(Y, E_w, E_ww=None):
             E_Y['c'] += Y['ww'] @ E_ww
         E_Y = LinQuadVar(E_Y, Y.shape, False)
         return E_Y
+        
+def N_tilde_measure(log_N, var_shape):
+    r"""
+    Computes the distored distribution of shocks implied by the change of measure N_tilde
+
+    Parameters
+    ----------
+    log_N : LinQuadVar
+        Log N tilde
+    var_shape : tuple of ints
+        (1, n_X, n_W)
+
+    Returns
+    ----------
+    change_of_measure : dict
+        A dictionary containing the distored distribution of shocks implied by the change of measure N_tilde
+        Λ : ndarray
+            transformed coefficients on ww term for log N tilde
+        H_0 : ndarray
+            coefficients on w term for log N tilde
+        H_1 : ndarray
+            transformed coefficients on xw term for log N tilde
+        Λ_tilde_inv : ndarray
+            distorted covariance matrix
+        Γ : ndarray
+            matrix square root of the distorted covariance matrix
+        H_tilde_0 : ndarray
+            distorted mean coefficients on constant terms
+        H_tilde_1 : ndarray
+            distorted mean coefficients on x terms
+        H_tilde_1_aug : ndarray
+            distorted mean coefficients on x terms augmented by zero matrices
+    """
+    n_Y, n_X, n_W = var_shape
+
+    Ψ_0 = log_N['w']
+    Ψ_1 = log_N['xw']
+    Ψ_2 = log_N['ww']
+    
+    Λ = -sym(mat(2*Ψ_2,(n_W,n_W)))
+    H_0 = Ψ_0.T
+    H_1 = mat(Ψ_1, (n_W, n_X))
+    Λ_tilde = np.eye(n_W) + Λ
+    Λ_tilde_inv = np.linalg.inv(Λ_tilde) 
+    H_tilde_0 = Λ_tilde_inv@H_0
+    H_tilde_1 = Λ_tilde_inv@H_1
+    Γ = sp.linalg.sqrtm(Λ_tilde_inv)
+    H_tilde_1_aug = np.block([[np.zeros([n_W,n_Y]),H_tilde_1]])
+    change_of_measure = {
+                        'Λ':Λ, 
+                        'H_0':H_0, 
+                        'H_1':H_1, 
+                        'Λ_tilde':Λ_tilde, 
+                        'Λ_tilde_inv':Λ_tilde_inv,
+                        'H_tilde_0':H_tilde_0,
+                        'H_tilde_1':H_tilde_1,
+                        'Γ':Γ,
+                        'H_tilde_1_aug':H_tilde_1_aug}
+    
+    return change_of_measure
+
+def E_N_tp1(Y, change_of_measure):
+    """
+    Computes the expectation implied by log N tilde.
+    The expecation calculated in this function has the state dependent terms 
+
+    Parameters
+    ----------
+    Y : LinQuadVar
+        The LinQuadVar to be taken expectation
+    change_of_measure : dict
+        A dictionary containing the distored distribution of shocks implied by the change of measure N_tilde
+        returned by the funciton N_tilde_measure
+    
+    Returns
+    ----------
+    E_Y : LinQuadVar
+        Expectation of Y
+    """
+    n_Y, n_X, n_W = Y.shape
+    E_Y = {}
+    E_Y['x2'] = Y['x2']
+    E_Y['xx'] = Y['xx'] + Y['ww'] @ np.kron(change_of_measure['H_tilde_1'],change_of_measure['H_tilde_1']) \
+                + (Y['xw'].reshape([n_X,n_W])@change_of_measure['H_tilde_1']).T.reshape([n_Y,n_X**2])
+    E_Y['x'] = Y['x'] + Y['w'] @ change_of_measure['H_tilde_1'] \
+                + Y['ww'] @ (np.kron(change_of_measure['H_tilde_0'],change_of_measure['H_tilde_1']) + np.kron(change_of_measure['H_tilde_1'],change_of_measure['H_tilde_0']))\
+                + (Y['xw'].reshape([n_X,n_W])@change_of_measure['H_tilde_0']).T.reshape([n_Y,n_X])
+    E_Y['c'] = Y['c'] + Y['w'] @ change_of_measure['H_tilde_0'] + Y['ww'] @ (np.kron(change_of_measure['H_tilde_0'],change_of_measure['H_tilde_0'])+vec(change_of_measure['Λ_tilde_inv']))
+    E_Y = LinQuadVar(E_Y, Y.shape, False)
+    return E_Y
 
 def kron_comm(AB, nX, nW):
     if not np.any(AB):
@@ -261,6 +362,7 @@ def kron_comm(AB, nX, nW):
     for i in prange(AB.shape[0]):
         kcAB[i] = vec(mat(AB[i:i+1, :].T, (nX, nW)).T).T
     return kcAB
+
 
 def log_E_exp(Y):
     r"""
@@ -447,7 +549,75 @@ def Q_mapping(M, f, X1_tp1, X2_tp1, tol = 1e-10, max_iter = 20000, second_order 
 #    Qf_evaluate += np.exp(f_next(*x))/(1-np.exp(η))
         
     return Qf_components_log, f, η, η_series
+
+def Q_mapping_no_cons(M, f, X1_tp1, X2_tp1, tol = 1e-10, max_iter = 20000, second_order = True):
+    r'''
+    Computes limiting coefficients of a LinQuadVar by recursively applying the M mapping operator till convergence, returns the eigenvalue and eigenvector.
+
+    Parameters
+    ----------
+    log_M_growth : LinQuadVar
+        Log difference of multiplicative functional.
+        e.g. log consumption growth, :math:`\log \frac{C_{t+1}}{C_t}`
+    f : LinQuadVar
+        The function M Mapping operate on. 
+        e.g. A function that is identically one, log_f = LinQuadVar({'c': np.zeros((1,1))}, log_M_growth.shape)
+    X1_tp1 : LinQuadVar 
+        Stores the coefficients of laws of motion for X1.
+    X2_tp2 : LinQuadVar or None
+        Stores the coefficients of laws of motion for X2.  
+    tol: float
+        tolerance for convergence
+    max_iter: int
+        maximum iteration
+    second_order: boolean
+        Whether the second order expansion of the state evoluton equation has been input
+
+    Returns
+    -------
+    Qf_components_log : List of LinQuadVar
+        stores the coefficients of the LinQuadVar in each iteration of M Mapping
+    f: LinQuadVar
+        The function M Mapping operate on. 
+        e.g. A function that is identically one, log_f = LinQuadVar({'c': np.zeros((1,1))}, log_M_growth.shape)
+    η: float
+        The eigenvalue
+    η_series: list of float
+        The convergence path of the eigenvalue 
+    '''
+    η_series = []
+    Qf_components_log = []
+#    Qf_evaluate = 0.
+    for i in range(max_iter):
+        Qf_components_log.append(f)
+#        Qf_evaluate += np.exp(f(*x))
+        if second_order:
+            f_next = M_mapping(M, f, X1_tp1, X2_tp1, second_order = second_order)
+        else:
+            if X2_tp1 != None:
+                print('The second order expansion for law of motion is not used in the first order expansion.')
+            f_next = M_mapping(M, f, X1_tp1, second_order = second_order)
+        η = (f_next['c'] - f['c']).item()
+        η_series.append(η)
+        
+        if distance(f, f_next, ['x', 'xx', 'x2']) < tol:
+            break
+        f_next = LinQuadVar({'x':f_next['x'],\
+                            'w':f_next['w'],\
+                            'xx':f_next['xx'],\
+                            'xw':f_next['xw'],\
+                            'ww':f_next['ww'],\
+                            'x2':f_next['x2']}, shape = f_next.shape)
+        f = f_next
     
+    print('Convergence periods:',i)
+    if i >= max_iter-1:
+        print("Warning: Q iteration may not have converged.")
+    Qf_components_log.append(f_next)
+#    Qf_evaluate += np.exp(f_next(*x))/(1-np.exp(η))
+        
+    return Qf_components_log, f, η, η_series
+
 def Q_mapping_eval(Qf_components_log, η, x):
     """
     Evaluate all the Qf_components_log given x recurisvely
