@@ -64,7 +64,7 @@ We look forward to your comments and appreciate your feedback!
 
 ## Installation and Usage
 
-We can directly download the whole GitHub repo to use the `Expansion Suite`. We can also use all functions in the  `Expansion Suite` from a Python package.
+We can directly download the whole GitHub repo to use the `Expansion Suite`. We can also use all functions in the  `Expansion Suite` from the Python package `mfrpy`.
 
 One line code
 
