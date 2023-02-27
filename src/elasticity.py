@@ -53,11 +53,12 @@ def exposure_elasticity(log_M_growth, X1_tp1, X2_tp1, T=400, shock=0, percentile
     Σ_tilde_t, μ_t0, μ_t1 = _elasticity_coeff(log_M_growth, X1_tp1, X2_tp1, T)
 
     kron_product = np.kron(X1_tp1['x'], X1_tp1['x'])
+    x_mean = np.linalg.solve(np.eye(n_X)-X1_tp1['x'],X1_tp1['c'])
     x_cov = mat(np.linalg.solve(np.eye(n_X**2)-kron_product,
                                 vec(X1_tp1['w']@X1_tp1['w'].T)), (n_X, n_X))
 
     elasticities = _exposure_elasticity_loop(T, n_Y, α, Σ_tilde_t, μ_t0,
-                                             μ_t1, percentile, x_cov, p)
+                                             μ_t1, percentile, x_mean, x_cov, p)
 
     return elasticities
 
@@ -112,26 +113,27 @@ def price_elasticity(log_G_growth, log_S_growth, X1_tp1, X2_tp1, T=400, shock=0,
         = _elasticity_coeff(log_G_growth+log_S_growth, X1_tp1, X2_tp1, T)
 
     kron_product = np.kron(X1_tp1['x'], X1_tp1['x'])
+    x_mean = np.linalg.solve(np.eye(n_X)-X1_tp1['x'],X1_tp1['c'])
     x_cov = mat(np.linalg.solve(np.eye(n_X**2)-kron_product,
                                 vec(X1_tp1['w']@X1_tp1['w'].T)), (n_X, n_X))
     
     elasticities = _price_elasticity_loop(T, n_Y, α, Σ_tilde_expo_t, Σ_tilde_value_t, 
                            μ_expo_t0, μ_value_t0, μ_expo_t1, μ_value_t1,
-                           percentile, x_cov, p)
+                           percentile, x_mean, x_cov, p)
 
     return elasticities
 
 
 @njit(parallel=True)
-def _exposure_elasticity_loop(T, n_Y, α, Σ_tilde_t, μ_t0, μ_t1, percentile, x_cov, p):
+def _exposure_elasticity_loop(T, n_Y, α, Σ_tilde_t, μ_t0, μ_t1, percentile, x_mean, x_cov, p):
     elasticities = np.zeros((T, n_Y))
     if percentile == 0.5:
         for t in prange(T):
-            elasticity = (α@Σ_tilde_t[t]@μ_t0[t])[0]
+            elasticity = (α@Σ_tilde_t[t]@μ_t0[t])[0] +(α@Σ_tilde_t[t]@μ_t1[t]@x_mean)[0]
             elasticities[t] = elasticity
     else:
         for t in prange(T):
-            elasticity = (α@Σ_tilde_t[t]@μ_t0[t])[0]
+            elasticity = (α@Σ_tilde_t[t]@μ_t0[t])[0] +(α@Σ_tilde_t[t]@μ_t1[t]@x_mean)[0]
             A = α@Σ_tilde_t[t]@μ_t1[t]
             elasticity = _compute_percentile(A, elasticity, x_cov, p)
             elasticities[t] = elasticity
@@ -141,17 +143,21 @@ def _exposure_elasticity_loop(T, n_Y, α, Σ_tilde_t, μ_t0, μ_t1, percentile, 
 @njit(parallel=True)
 def _price_elasticity_loop(T, n_Y, α, Σ_tilde_expo_t, Σ_tilde_value_t, 
                            μ_expo_t0, μ_value_t0, μ_expo_t1, μ_value_t1,
-                           percentile, x_cov, p):
+                           percentile, x_mean, x_cov, p):
     elasticities = np.zeros((T, n_Y))
     if percentile == 0.5:
         for t in prange(T):
-            elasticity = (α @ (Σ_tilde_expo_t[t] @ μ_expo_t0[t]\
-                               - Σ_tilde_value_t[t] @ μ_value_t0[t]))[0]
+            elasticity = (α @ (Σ_tilde_expo_t[t] @ μ_expo_t0[t] \
+                               - Σ_tilde_value_t[t] @ μ_value_t0[t]))[0]\
+                          +(α@(Σ_tilde_expo_t[t]@μ_expo_t1[t]@x_mean\
+                              - Σ_tilde_value_t[t] @ μ_value_t1[t]@x_mean))[0]
             elasticities[t] = elasticity        
     else:
         for t in prange(T):
             elasticity = (α @ (Σ_tilde_expo_t[t] @ μ_expo_t0[t]\
-                               - Σ_tilde_value_t[t] @ μ_value_t0[t]))[0]
+                               - Σ_tilde_value_t[t] @ μ_value_t0[t]))[0]\
+                            +(α@(Σ_tilde_expo_t[t]@μ_expo_t1[t]@x_mean\
+                              - Σ_tilde_value_t[t] @ μ_value_t1[t]@x_mean))[0]
             A = α @ (Σ_tilde_expo_t[t]@μ_expo_t1[t]\
                      - Σ_tilde_value_t[t]@μ_value_t1[t])
             elasticity = _compute_percentile(A, elasticity, x_cov, p)
@@ -324,40 +330,3 @@ def _elasticity_coeff_inner_loop(Φ_star_1tm1_all, Φ_star_2tm1_all, Φ_star_3tm
         μ_t1_all[t] = μ_t1
     
     return Σ_tilde_t_all, μ_t0_all, μ_t1_all
-
-
-def exposure_elasticity_with_x(log_M_growth, X1_tp1, X2_tp1, x1, α, T):
-
-    n_Y, n_X, n_W = log_M_growth.shape
-    if n_Y != 1:
-        raise ValueError("The dimension of input should be 1.")
-
-    Σ_tilde_t, μ_t0, μ_t1 = _elasticity_coeff(log_M_growth, X1_tp1, X2_tp1, T)
-
-    elasticities = np.zeros(T)
-    
-    for i in range(T):
-        elasticities[i] = α.T@Σ_tilde_t[i]@(μ_t0[i] + μ_t1[i]@x1)
-
-    return elasticities
-
-def Q_der_16(Qf_components_log, Qf_evaluate, η, log_M, x, X1_tp1, X2_tp1, α):
-    
-    x1 = x[0]
-
-    elasticities = exposure_elasticity_with_x(log_M, X1_tp1, X2_tp1, x1, α, len(Qf_components_log))
-    
-    elasticities = np.concatenate((np.zeros(1), elasticities))
-    
-    weights = np.zeros(len(elasticities))
-    
-    for t in range(len(weights) - 1):
-        weights[t] = np.exp(Qf_components_log[t](*x))
-        
-    Qf_components_log_last = M_mapping(log_M, Qf_components_log[-1], X1_tp1, X2_tp1)
-    
-    weights[-1] = np.exp(Qf_components_log_last(*x))/(1-np.exp(η))
-    
-    weights = weights/Qf_evaluate
-    
-    return np.sum(elasticities * weights)
