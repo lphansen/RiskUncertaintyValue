@@ -10,7 +10,9 @@
 
 We look forward to your comments and appreciate your feedback!
 
+QuantMFR website:
 
+https://lphansen.github.io/QuantMFR/theory/quickguide_update.html
 
 
 ## Source Files
