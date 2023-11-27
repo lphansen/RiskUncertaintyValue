@@ -95,20 +95,16 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util =
     γ = args[0]
     β = args[1]
     ρ = args[2]
-
-    ## Take derivatives with respect to perturbation parameter q
     df, ss = take_derivatives(eq, ss, var_shape, True, args)
     H_fun_list = [(lambda y: (lambda JX_t, JX_tp1, W_tp1, q, *args: eq(JX_t, JX_tp1, W_tp1, q, 'psi1', *args)[y]))(i) for i in range(n_J)]
-    
-    ## Zeroth-order steady state
+
     X0_t = LinQuadVar({'c': ss[n_J:].reshape(-1, 1)}, (n_X, n_X, n_W), False)
     J0_t = LinQuadVar({'c': ss[:n_J].reshape(-1, 1)}, (n_J, n_X, n_W), False)
     JX0_t = concat([J0_t, X0_t])
     X1_t = LinQuadVar({'x': np.eye(n_X)}, (n_X, n_X, n_W), False)
     X2_t = LinQuadVar({'x2': np.eye(n_X)}, (n_X, n_X, n_W), False)
+    
     H0_t = [approximate_fun(H_fun, np.concatenate([np.zeros(1), ss]), (1, n_X, n_W), None, None, None, None, args, second_order = False, zeroth_order= True) for H_fun in H_fun_list]
-
-    ## Initialize the change of measure
     if init_util == None:
         util_sol = {'μ_0': np.zeros([n_W,1]),
                     'Upsilon_2':np.zeros([n_W,n_W]),
@@ -120,7 +116,7 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util =
     util_sol['Σ_tilde'] = np.linalg.inv(np.eye(n_W)-0.5*util_sol['Upsilon_2']*(1-γ))
     util_sol['Γ_tilde'] = sp.linalg.sqrtm(util_sol['Σ_tilde'])
     util_sol['μ_tilde_t'] = LinQuadVar({'x':0.5*(1-γ)*util_sol['Σ_tilde']@util_sol['Upsilon_1'], 'c':(1-γ)*util_sol['Σ_tilde']@(1/(1-γ)*util_sol['μ_0']+0.5*(util_sol['Upsilon_0']-util_sol['Upsilon_2']@util_sol['μ_0']))},shape=(n_W,n_X,n_W))
-        
+            
     μ_0_series = []
     J1_t_series = []
     J2_t_series = []
@@ -129,7 +125,6 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util =
     i = 0
     error = 1
 
-    ## Iterate change of measure and model solutions to convergence
     while error > iter_tol and i < max_iter:
         if approach == '1':
             J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde = first_order_expansion_approach_1(df, util_sol, var_shape, H0_t, args)
@@ -156,7 +151,6 @@ def uncertain_expansion(eq, ss, var_shape, args, gc, approach = '1', init_util =
         
         i+=1
 
-    ## Formulate the solution
     JX_t = JX0_t + JX1_t + 0.5*JX2_t
     JX_tp1 = next_period(JX_t, X1_tp1, X2_tp1)
     JX_tp1_tilde = next_period(JX_t, X1_tp1_tilde, X2_tp1_tilde)
@@ -244,16 +238,12 @@ def first_order_expansion_approach_1(df, util_sol, var_shape, H0, args):
     γ = args[0]
     ρ = args[2]
 
-    ## Compute the Schur decomposition of the derivative matrix
     schur = schur_decomposition(-df['xtp1'], df['xt'], (n_J, n_X, n_W))
-
-    ## Compute the adjustment term
     μ_0 = util_sol['μ_0']
     H_1 = np.zeros([n_JX,1])
     for i in range(len(H0)):
         H_1[HQ_loc_list[i]] = μ_0.T@μ_0*(ρ-1)/2/(1-γ)*H0[i]
     
-    ## Solve for the constant term in the first-order expansion under the distorted measure 
     f_1_xtp1 = df['xtp1'][:n_J]
     f_1_wtp1 = df['wtp1'][:n_J]
     f_2_xtp1 = df['xtp1'][n_J:]
@@ -265,7 +255,6 @@ def first_order_expansion_approach_1(df, util_sol, var_shape, H0, args):
     D = np.linalg.solve(LHS, RHS)
     C = D[:n_J] - schur['N']@D[n_J:]
 
-    ## Solve for the constant term in the first-order expansion under the original measure
     ψ_tilde_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt@schur['N_block'])
     ψ_tilde_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)
     ψ_tilde_q = D[n_J:] - ψ_tilde_x@D[n_J:]
@@ -275,7 +264,6 @@ def first_order_expansion_approach_1(df, util_sol, var_shape, H0, args):
     D_org = np.linalg.solve(LHS_org, RHS_org)
     ψ_q = D_org[n_J:] - ψ_tilde_x@D_org[n_J:]
 
-    ## Formulate the solution for the first-order expansion
     X1_tp1 = LinQuadVar({'x': ψ_tilde_x, 'w': ψ_tilde_w, 'c': ψ_q}, (n_X, n_X, n_W), False)
     X1_tp1_tilde = LinQuadVar({'x': ψ_tilde_x, 'w': ψ_tilde_w, 'c': ψ_tilde_q}, (n_X, n_X, n_W), False)
     J1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_J,n_X,n_W), False)
@@ -331,11 +319,9 @@ def second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
     """
     n_J, n_X, n_W = var_shape
 
-    ## Compute the Schur decomposition of the derivative matrix
     schur = schur_decomposition(-df['xtp1'], df['xt'], (n_J, n_X, n_W))
     μ_0 = util_sol['μ_0']
 
-    ## Extract the contribution from the first order expansion
     Wtp1 = LinQuadVar({'w': np.eye(n_W),'c':μ_0}, (n_W, n_X, n_W), False)
     D2 = combine_second_order_terms(df, JX1_t, JX1_tp1_tilde, Wtp1)
     D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
@@ -344,8 +330,6 @@ def second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
     M_E_ww = cal_E_ww(M_E_w, cov_w)
     E_D2 = E(D2, M_E_w, M_E_ww)
     E_D2_coeff = np.block([[E_D2['c']+adj['c'], E_D2['x']+adj['x'], E_D2['xx']]])
-
-    ## Solve for the first-order contribution in the jump variables
     X1X1_tilde = kron_prod(X1_tp1_tilde, X1_tp1_tilde)
     M_mat = form_M0(M_E_w, M_E_ww, X1_tp1_tilde, X1X1_tilde)
     LHS = np.eye(n_J*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
@@ -355,9 +339,7 @@ def second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
     G = np.linalg.solve(schur['Z21'], D_tilde)
 
     def solve_second_state(X1_tp1, JX1_tp1, Wtp1):
-        '''
-        Solve for the first-order contribution in the state variable evolution
-        '''
+
         D2 = combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1)
         D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
 
@@ -384,15 +366,12 @@ def second_order_expansion_approach_1(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
 
         return X2_tp1
 
-    ## Solve for the state evolution under the distorted measure
     Wtp1 = LinQuadVar({'w': np.eye(n_W),'c':μ_0}, (n_W, n_X, n_W), False)
     X2_tp1_tilde = solve_second_state(X1_tp1_tilde, JX1_tp1_tilde, Wtp1)
     
-    ## Solve for the state evolution under the original measure
     Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_X, n_W), False)
     X2_tp1 = solve_second_state(X1_tp1, JX1_tp1, Wtp1)
 
-    ## Formulate the solution for the second-order expansion
     J2_t = LinQuadVar({'x2': schur['N'], 'xx': G[:, 1+n_X:1+n_X+(n_X)**2], 'x': G[:, 1:1+n_X], 'c': G[:, :1]}, (n_J, n_X, n_W), False)
     X2_t = LinQuadVar({'x2': np.eye(n_X)}, (n_X, n_X, n_W), False)
     JX2_t = concat([J2_t, X2_t])
@@ -409,14 +388,14 @@ def first_order_expansion_approach_2(df, util_sol, var_shape, H0, args):
     n_J, n_X, n_W = var_shape
     n_JX = n_J + n_X
     HQ_loc_list = [i for i in range(n_J)]
+    
     γ = args[0]
     ρ = args[2]
-
-    ## Compute the adjustment term 
     μ_0 = util_sol['μ_0']
     Σ_tilde = util_sol['Σ_tilde']
     Γ_tilde = util_sol['Γ_tilde']
     μ_tilde_t = util_sol['μ_tilde_t']
+
     H_1_x = np.zeros([n_JX,n_X])
     H_1_c = np.zeros([n_JX,1])
     for i in range(len(H0)):
@@ -425,10 +404,8 @@ def first_order_expansion_approach_2(df, util_sol, var_shape, H0, args):
     df_adj = np.block([[np.zeros([n_JX,n_J]),H_1_x]])
     df_mix = np.block([[np.zeros([n_JX,n_J]),df['wtp1']@μ_tilde_t['x']]])
 
-    ## Compute the Schur decomposition of the derivative matrix
     schur = schur_decomposition(-df['xtp1'], df['xt']+df_adj+df_mix, (n_J, n_X, n_W))
     
-    ## Solve for the constant term in the first-order expansion under the distorted measure
     f_1_xtp1 = df['xtp1'][:n_J]
     f_1_wtp1 = df['wtp1'][:n_J]
     f_2_xtp1 = df['xtp1'][n_J:]
@@ -440,7 +417,6 @@ def first_order_expansion_approach_2(df, util_sol, var_shape, H0, args):
     D = np.linalg.solve(LHS, RHS)
     C = D[:n_J] - schur['N']@D[n_J:]
 
-    ## Solve for the constant term in the first-order expansion under the original measure
     ψ_tilde_x = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_xt_tilde@schur['N_block'])
     ψ_tilde_w = np.linalg.solve(-f_2_xtp1@schur['N_block'], f_2_wtp1)@Γ_tilde
     ψ_tilde_q = D[n_J:] - ψ_tilde_x@D[n_J:]
@@ -457,7 +433,6 @@ def first_order_expansion_approach_2(df, util_sol, var_shape, H0, args):
     D_org = np.linalg.solve(LHS_org, RHS_org)
     ψ_q = D_org[n_J:] - ψ_tilde_x@D_org[n_J:]
 
-    ## Formulate the solution for the first-order expansion
     X1_tp1 = LinQuadVar({'x': ψ_x, 'w': ψ_w, 'c': ψ_q}, (n_X, n_X, n_W), False)
     X1_tp1_tilde = LinQuadVar({'x': ψ_tilde_x, 'w': ψ_tilde_w, 'c': ψ_tilde_q}, (n_X, n_X, n_W), False)
     J1_t = LinQuadVar({'x': schur['N'], 'c': C}, (n_J,n_X,n_W), False)
@@ -523,15 +498,13 @@ def second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
 
     """
     n_J, n_X, n_W = var_shape
-
-    ## Compute the Schur decomposition of the derivative matrix
     schur = schur_decomposition(-df['xtp1'], df['xt'], (n_J, n_X, n_W))
 
-    ## Extract the contribution from the first order expansion
     μ_0 = util_sol['μ_0']
     Σ_tilde = util_sol['Σ_tilde']
     Γ_tilde = util_sol['Γ_tilde']
     μ_tilde_t = util_sol['μ_tilde_t']
+
     Wtp1 = LinQuadVar({'w': Γ_tilde, 'c':μ_tilde_t['c'], 'x': μ_tilde_t['x']}, (n_W, n_X, n_W), False)
     D2 = combine_second_order_terms(df, JX1_t, JX1_tp1_tilde, Wtp1)
     D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
@@ -540,8 +513,6 @@ def second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
     M_E_ww = cal_E_ww(M_E_w, cov_w)
     E_D2 = E(D2, M_E_w, M_E_ww)
     E_D2_coeff = np.block([[E_D2['c']+adj['c'], E_D2['x']+adj['x'], E_D2['xx']+adj['xx']]])
-
-    ## Solve for the first-order contribution in the jump variables
     X1X1_tilde = kron_prod(X1_tp1_tilde, X1_tp1_tilde)
     M_mat = form_M0(M_E_w, M_E_ww, X1_tp1_tilde, X1X1_tilde)
     LHS = np.eye(n_J*M_mat.shape[0]) - np.kron(M_mat.T, np.linalg.solve(schur['Λ22'], schur['Λp22']))
@@ -553,9 +524,7 @@ def second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
     ψ_x2 = X1_tp1['x']
 
     def solve_second_state(X1_tp1, JX1_tp1, Wtp1):
-        '''
-        Solve for the first-order contribution in the state variable evolution
-        '''
+
         D2 = combine_second_order_terms(df, JX1_t, JX1_tp1, Wtp1)
         D2_coeff = np.block([[D2['c'], D2['x'], D2['w'], D2['xx'], D2['xw'], D2['ww']]])
 
@@ -582,15 +551,12 @@ def second_order_expansion_approach_2(df, util_sol, X1_tp1, X1_tp1_tilde, JX1_t,
 
         return X2_tp1
 
-    ## Solve for the state evolution under the distorted measure
     Wtp1 = LinQuadVar({'w': Γ_tilde, 'c':μ_tilde_t['c'], 'x': μ_tilde_t['x']}, (n_W, n_X, n_W), False)
     X2_tp1_tilde = solve_second_state(X1_tp1_tilde, JX1_tp1_tilde, Wtp1)
 
-    ## Solve for the state evolution under the original measure
     Wtp1 = LinQuadVar({'w': np.eye(n_W)}, (n_W, n_X, n_W), False)
     X2_tp1 = solve_second_state(X1_tp1, JX1_tp1, Wtp1)
 
-    ## Formulate the solution for the second-order expansion
     J2_t = LinQuadVar({'x2': schur['N'], 'xx': G[:, 1+n_X:1+n_X+(n_X)**2], 'x': G[:, 1:1+n_X], 'c': G[:, :1]}, (n_J, n_X, n_W), False)
     X2_t = LinQuadVar({'x2': np.eye(n_X)}, (n_X, n_X, n_W), False)
     JX2_t = concat([J2_t, X2_t])
@@ -847,8 +813,6 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     γ = args[0]
     β = args[1]
     ρ = args[2]
-
-    ## Approximate the growth of consumption
     gc_tp1_approx = approximate_fun(gc_tp1_fun, np.concatenate([np.zeros(1), ss]), (1, n_X, n_W), concat([LinQuadVar({'c':np.zeros([1,1])}, shape=(1,n_X,n_W)),JX1_t]), concat([LinQuadVar({'c':np.zeros([1,1])}, shape=(1,n_X,n_W)),JX2_t]), X1_tp1, X2_tp1, args)
 
     gc_tp1 = gc_tp1_approx[0]
@@ -865,7 +829,6 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     
     λ = β * np.exp((1-ρ) * gc0_tp1)
     
-    ## Solve for the first order expansion of the continuation values
     def solve_vmc1_t(order1_init_coeffs):
 
         vmc1_t = return_order1_t(order1_init_coeffs)
@@ -885,7 +848,6 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     Ew0 = μ_0.copy()
     Eww0 = cal_E_ww(Ew0,np.eye(Ew0.shape[0]))
 
-    ## Solve for the second order expansion of the continuation values
     def solve_vmc2_t(order2_init_coeffs):
 
         vmc2_t = return_order2_t(order2_init_coeffs)
@@ -900,8 +862,6 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     rmc2_t = E(next_period(vmc2_t, X1_tp1, X2_tp1) + gc2_tp1, Ew0, Eww0)
     vmc2_tp1 = next_period(vmc2_t, X1_tp1, X2_tp1)
     vmr2_tp1 = vmc2_tp1 + gc2_tp1 - rmc2_t
-
-    ## Formulate change of measure
     log_N_tilde = (1-γ)*(vmc1_tp1+gc1_tp1 + 0.5*(vmc2_tp1+gc2_tp1))-log_E_exp((1-γ)*(vmc1_tp1+gc1_tp1 + 0.5*(vmc2_tp1+gc2_tp1)))
     Upsilon_2 = vmr2_tp1['ww'].reshape(n_W,n_W).T*2
     Upsilon_1 = vmr2_tp1['xw'].reshape((n_X,n_W)).T
@@ -910,7 +870,14 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
     Γ_tilde = sp.linalg.sqrtm(Σ_tilde)
     μ_tilde_t = LinQuadVar({'x':0.5*(1-γ)*Σ_tilde@Upsilon_1, 'c':(1-γ)*Σ_tilde@(1/(1-γ)*μ_0+0.5*(Upsilon_0-Upsilon_2@μ_0))},shape=(n_W,n_X,n_W))
 
+    vmc0_t = (np.log(1-β) - np.log(1-β*np.exp((1-ρ)*gc0_tp1)))/(1-ρ)
+    rmc0_t = vmc0_t + gc0_tp1
+
+    vmc_t = LinQuadVar({'c':np.array([[vmc0_t]])},(1, n_X, n_W))+vmc1_t+0.5*vmc2_t
+    rmc_t = LinQuadVar({'c':np.array([[rmc0_t]])},(1, n_X, n_W))+rmc1_t+0.5*rmc2_t
+
     util_sol = {'μ_0': μ_0, 
+                'λ' : λ,
                 'Upsilon_2': Upsilon_2, 
                 'Upsilon_1': Upsilon_1, 
                 'Upsilon_0': Upsilon_0, 
@@ -920,10 +887,14 @@ def solve_utility(ss, var_shape, args, X1_tp1, X2_tp1, JX1_t, JX2_t, gc_tp1_fun,
                 'gc0_tp1': gc0_tp1,
                 'gc1_tp1': gc1_tp1,
                 'gc2_tp1': gc2_tp1,
+                'vmc0_t':vmc0_t,
+                'rmc0_t':rmc0_t,
                 'vmc1_t': vmc1_t,
                 'vmc2_t': vmc2_t,
                 'rmc1_t': rmc1_t,
                 'rmc2_t': rmc2_t,
+                'vmc_t':vmc_t,
+                'rmc_t':rmc_t,
                 'vmr1_tp1': vmr1_tp1, 
                 'vmr2_tp1': vmr2_tp1,
                 'Σ_tilde':Σ_tilde,
