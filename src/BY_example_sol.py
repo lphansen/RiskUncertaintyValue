@@ -3,7 +3,6 @@ import autograd.numpy as anp
 import scipy as sp
 from scipy import optimize
 np.set_printoptions(suppress=True)
-from tqdm import tqdm
 import pickle 
 import matplotlib.pyplot as plt
 import seaborn as sns
