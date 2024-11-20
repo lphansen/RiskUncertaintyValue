@@ -7,88 +7,6 @@ from autograd import jacobian
 import warnings
 
 
-# def take_derivatives(eq, ss, var_shape, second_order, eq_cond,
-    #                   args, norecursive=False):
-    # """
-    # Take first- or second-order derivatives.
-
-    # """
-    # n_J, n_X, n_W = var_shape
-    # n_JX = n_J + n_X
-    # W_0 = np.zeros(n_W)
-    # q_0 = 0.
-
-    # if norecursive==False:  
-    #     if callable(ss):
-    #         ss = ss(*args)
-
-        
-    # else:
-    #     ss = ss(*args)[3:]
-    #     print(ss)
-
-    # dfq = compute_derivatives(f = lambda Var_t, Var_tp1, W_tp1,  q:
-    #                         anp.atleast_1d(eq(Var_t, Var_tp1, W_tp1, q,  eq_cond, *args)),
-    #                          X=[ss, ss, W_0, q_0],
-    #                          second_order=second_order)
-
-    # if norecursive==False:            
-    #     df = {'xt':dfq['xt'][:,1:],\
-    #         'xtp1':dfq['xtp1'][:,1:],\
-    #         'wtp1':dfq['wtp1'],\
-    #         'q':dfq['q'],\
-    #         'xtxt':dfq['xtxt'][:,n_JX+1:][:,np.tile(np.concatenate([np.array([False]),np.repeat(True, n_JX)]),n_JX)],\
-    #         'xtxtp1':dfq['xtxtp1'][:,n_JX+1:][:,np.tile(np.concatenate([np.array([False]),np.repeat(True, n_JX)]),n_JX)],\
-    #         'xtwtp1':dfq['xtwtp1'][:,n_W:],\
-    #         'xtq':dfq['xtq'][:,1:],\
-    #         'xtp1xtp1':dfq['xtp1xtp1'][:,n_JX+1:][:,np.tile(np.concatenate([np.array([False]),np.repeat(True, n_JX)]),n_JX)],\
-    #         'xtp1wtp1':dfq['xtp1wtp1'][:,n_W:],\
-    #         'xtp1q':dfq['xtp1q'][:,1:],\
-    #         'wtp1wtp1':dfq['wtp1wtp1'],\
-    #         'wtp1q':dfq['wtp1q'],\
-    #         'qq':dfq['qq']}      
-    
-    # else:
-    #     df = {'xt':dfq['xt'][:,:],\
-    #         'xtp1':dfq['xtp1'][:,:],\
-    #         'wtp1':dfq['wtp1'],\
-    #         'q':dfq['q'],\
-    #         'xtxt':dfq['xtxt'][:,   :],\
-    #         'xtxtp1':dfq['xtxtp1'][:,:],\
-    #         'xtwtp1':dfq['xtwtp1'][:,:],\
-    #         'xtq':dfq['xtq'][:,:],\
-    #         'xtp1xtp1':dfq['xtp1xtp1'][:,:],\
-    #         'xtp1wtp1':dfq['xtp1wtp1'][:,:],\
-    #         'xtp1q':dfq['xtp1q'][:,:],\
-    #         'wtp1wtp1':dfq['wtp1wtp1'],\
-    #         'wtp1q':dfq['wtp1q'],\
-    #         'qq':dfq['qq']}   
-        
-                            
-    # ss = ss[1:]            
-    # return df, ss
-
-
-def combine_derivatives(df_list):
-    """
-    Combines df1, df2, ... into df by row.
-
-    Parameters
-    ----------
-    df_list : sequence of dict
-        Each dict is of (n_fi, ?) ndarrays, which are partial derivatives of fi.
-        These are returned values from compute_derivatives().
-
-    Returns
-    -------
-    df_list : dict of ndarrays
-
-    """
-    df = {}
-    for key in df_list[0].keys():
-        df[key] = np.vstack([dfi[key] for dfi in df_list])
-    return df
-
 def compute_derivatives(f, X, second_order=True):
     r"""
     Compute second-order and/or first-order partial derivatives.
@@ -207,3 +125,24 @@ def compute_derivatives(f, X, second_order=True):
         derivatives = {**derivatives, **second_order_derivatives}
 
     return derivatives
+
+
+def combine_derivatives(df_list):
+    """
+    Combines df1, df2, ... into df by row.
+
+    Parameters
+    ----------
+    df_list : sequence of dict
+        Each dict is of (n_fi, ?) ndarrays, which are partial derivatives of fi.
+        These are returned values from compute_derivatives().
+
+    Returns
+    -------
+    df_list : dict of ndarrays
+
+    """
+    df = {}
+    for key in df_list[0].keys():
+        df[key] = np.vstack([dfi[key] for dfi in df_list])
+    return df
