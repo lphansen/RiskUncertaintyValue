@@ -320,3 +320,21 @@ def disp(Lq, Var):
         Lq.coeffs.pop('c')
     Lq_disp = Var + '='+ '+'.join([Lq_disp[i] for i in ['c','x','w','x2','xx','xw','ww'] if i in Lq.coeffs])
     display(Math(Lq_disp))
+    
+# Suri edits 
+def disp_new(Lq, Var):
+    '''
+    Display adjustment cost Linquad in Latex analytical form
+    '''
+    Lq_disp = {'c': r'{:.4g}'.format(*Lq['c'].flatten().tolist()),\
+    'x': r'\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}X_t^1'.format(*Lq['x'].flatten().tolist()),\
+    'w':r'\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['w'].flatten().tolist()),\
+    'x2':r'\begin{{bmatrix}}{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}X_t^2'.format(*Lq['x2'].flatten().tolist()),\
+    'xx':r'X^{{1T}}_{{t}}\begin{{bmatrix}}{:.4g}&{:.4g}&{:4g}&{:4g}\\{:.4g}&{:.4g}&{:4g}&{:4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}X^1_{{t}}'.format(*Lq['xx'].flatten().tolist()),\
+    'xw':r'X^{{1T}}_{{t}}\begin{{bmatrix}}{:.4g}&{:.4g}&{:4g}\\{:.4g}&{:.4g}&{:4g}\\{:.4g}&{:.4g}&{:.4g}\\{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['xw'].flatten().tolist()),\
+    'ww':r'W_{{t+1}}^{{T}}\begin{{bmatrix}}{:.4g}&{:.4g}&{:4g}\\{:.4g}&{:.4g}&{:4g}\\{:.4g}&{:.4g}&{:.4g}\end{{bmatrix}}W_{{t+1}}'.format(*Lq['ww'].flatten().tolist())}
+    if (abs(Lq['c'].item())<1e-14) and abs(Lq['c'].item())!=0:
+        Lq_disp.pop('c')
+        Lq.coeffs.pop('c')
+    Lq_disp = Var + '='+ '+'.join([Lq_disp[i] for i in ['c','x','w','x2','xx','xw','ww'] if i in Lq.coeffs])
+    display(Math(Lq_disp))

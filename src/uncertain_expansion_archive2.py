@@ -78,23 +78,19 @@ def uncertain_expansion(control_variables, state_variables, shock_variables, var
         parameter_names = parameter_names,
         variables=variables,  # List of variables, such as [imk_t, Z_t, Y_t, ...]
         variables_tp1=variables_tp1,  # List of variables, such as [imk_t, Z_t, Y_t, ...]
-        state_variables=state_variables,  # List of state variables, such as [imk_t, Z_t, Y_t, ...]
-        control_variables=control_variables,  # List of control variables, such as [imk_t, Z_t, Y_t, ...]
         output_constraint=output_constraint,  # Defined symbolic equation
         capital_growth=capital_growth,  # Defined symbolic equation
         state_equations=state_equations, # Initial guess for solving the system
         var_shape=var_shape  # Dimensionality of shocks
     )
-    # print(ss_equations)
-    # print(ss_variables)
 
     # print(ss_variables)
     # print(type(ss_variables))
     ss_onecap_3d = generate_ss_function(ss_equations, ss_variables, ss_variables_tp1, initial_guess, var_shape, parameter_names)
     recursive_ss = ss_onecap_3d(args,return_recursive=True)[:2]
 
-    # eq_onecap_3d = generate_evaluation_function(ss_equations, ss_variables, ss_variables_tp1, H, L, var_shape, parameter_names)
-    # eq_onecap_3d(ss_onecap_3d(args),ss_onecap_3d(args),np.zeros(n_W),0.,'None',recursive_ss,args)
+    eq_onecap_3d = generate_evaluation_function(ss_equations, ss_variables, ss_variables_tp1, H, L, var_shape, parameter_names)
+    eq_onecap_3d(ss_onecap_3d(args),ss_onecap_3d(args),np.zeros(n_W),0.,'None',recursive_ss,args)
 
     f_cmk_app = func_cmk_app(ss_variables,ss_variables_tp1,var_shape)
     f_gc = func_gc(ss_variables,ss_variables_tp1,var_shape)
@@ -150,14 +146,6 @@ def uncertain_expansion(control_variables, state_variables, shock_variables, var
 
     ## Iterate change of measure and model solutions to convergence
     while error > iter_tol and i < max_iter:
-        # if len(error_series)>1:
-        #     # if error_series[-1] > error_series[-2]:  # Compare the last two elements
-        #     return first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0_t, L0_t, recursive_ss, parameter_names, args, return_df=True)
-    
-        # if len(error_series)>10:
-        #     if error_series[-1] > error_series[-2]:  # Compare the last two elements
-        #         return first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0_t, L0_t, recursive_ss, parameter_names, args, return_df=True)
-    
         if approach == '1':
             J1_t, JX1_t, JX1_tp1, JX1_tp1_tilde, X1_tp1, X1_tp1_tilde = first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0_t, L0_t, recursive_ss, parameter_names,args)
             adj = compute_adj_approach_1(H_fun_list, H, L, ss, ss_variables, ss_variables_tp1, var_shape, util_sol, JX1_t, X1_tp1, recursive_ss, parameter_names,args)
@@ -176,11 +164,8 @@ def uncertain_expansion(control_variables, state_variables, shock_variables, var
 
         if i > 0:
             error_1 = np.max(np.abs(μ_0_series[i] - μ_0_series[i-1]))
-            print('Iteration {}: mu_0 error = {:.9g}'.format(i, error_1))
             error_2 = np.max(np.abs(J1_t_series[i] - J1_t_series[i-1])) 
-            print('Iteration {}: J1 error = {:.9g}'.format(i, error_2))
             error_3 = np.max(np.abs(J2_t_series[i] - J2_t_series[i-1])) 
-            print('Iteration {}: J2 error = {:.9g}'.format(i, error_3))
             error = np.max([error_1, error_2, error_3])
             print('Iteration {}: error = {:.9g}'.format(i, error))
             error_series.append(error)
@@ -226,7 +211,6 @@ def uncertain_expansion(control_variables, state_variables, shock_variables, var
                         'args':args, 
                         'parameter_names':parameter_names,
                         'ss': ss, 
-                        'ss_equations': ss_equations,
                         'second_order': True})
     if savepath:
         with open(savepath, 'wb') as file:
@@ -268,7 +252,7 @@ def take_derivatives(eq, ss, ss_variables, ss_variables_tp1, parameter_names, va
                            
     return df, ss
 
-def first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0, L0, recursive_ss, parameter_names, args,return_df=False):
+def first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0, L0, recursive_ss, parameter_names, args):
     """
     Implements first-order expansion using approach 1.
 
@@ -284,10 +268,10 @@ def first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0, L0, recurs
 
     μ_0 = util_sol['μ_0']
 
-    # H_1 = np.zeros([n_JX,1])
-    # HQ_loc_list = [i for i in range(n_J)]
-    # for i in range(len(H0)):
-    #     H_1[HQ_loc_list[i]] = μ_0.T@μ_0*(ρ-1)/2/(1-γ)*H0[i]
+    H_1 = np.zeros([n_JX,1])
+    HQ_loc_list = [i for i in range(n_J)]
+    for i in range(len(H0)):
+        H_1[HQ_loc_list[i]] = μ_0.T@μ_0*(ρ-1)/2/(1-γ)*H0[i]
         
     Q0 = β*anp.exp((1.-ρ)*recursive_ss[0])
     Q1 = (1.-ρ)*Q0*(util_sol['rmv1_t'])
@@ -306,9 +290,6 @@ def first_order_expansion_approach_1(df, ss, util_sol, var_shape, H0, L0, recurs
 
     dfp = copy.deepcopy(df)
     dfp['xt'][:n_J, n_J:] += P1L0x + Q1H0x 
-
-    if return_df==True:
-        return [dfp,df]
 
     schur = schur_decomposition(-df['xtp1'], dfp['xt'], (n_J, n_X, n_W))
 
@@ -1417,202 +1398,96 @@ def get_parameter_value(parameter_name, parameter_names, args):
     return args[parameter_index]
 
 
-# def compile_equations(parameter_names, variables, variables_tp1,control_variables,state_variables,
-#                 output_constraint, capital_growth, state_equations, 
-#                 var_shape):
-#         n_J, n_X, n_W = var_shape
-#         n_C = n_J - n_X - 1 #number of endogenous state variables apart from cons
-#         symbols = {name: sp.Symbol(name) for name in parameter_names}
-#         symbols.update({param: sp.Symbol(param) for param in parameter_names})
-#         globals().update(symbols)
-
-        
-#         state_equations = state_equations + [capital_growth]
-#         var_capital_growth_tp1 = sp.Symbol(variables_tp1[n_X+n_C-1])
-#         state_variables = state_variables + ['log_gk_t']
-
-
-#         #Add additional variables
-#         log_cmk_t = sp.Symbol('log_cmk_t')
-#         vmk_t = sp.Symbol('vmk_t')
-#         rmv_t = sp.Symbol('rmv_t')
-
-#         #Costates
-#         co_states = [sp.Symbol('m'+str(i)+'_t') for i in range(n_X)]
-#         co_states_tp1 = [sp.Symbol('m'+str(i)+'_tp1') for i in range(n_X)]
-#         co_states[-1] = sp.Symbol('mg_t')
-#         co_states_tp1[-1] = sp.Symbol('mg_tp1')
-#         co_states = sp.Matrix(co_states)
-#         co_states_tp1 = sp.Matrix(co_states_tp1)
-        
-#         # Construct p and q
-#         p = (1 - beta) * sp.exp((1 - rho) * (-vmk_t))
-#         rec_cons = sp.exp((1 - rho)* (log_cmk_t)) 
-#         q = beta * sp.exp((1 - rho) * (rmv_t))
-
-        
-#         # Consumption derivatives
-#         consumption_derivatives = sp.Matrix([
-#             sp.diff(output_constraint, variables[i])
-#             for i in range(len(state_variables+control_variables))
-#         ])
-#         consumption_derivatives[-1] = 1.0  # Ensure last derivative is 1
-#         L = rec_cons*consumption_derivatives
-
-#         # State derivatives
-#         state_derivatives = sp.Matrix([
-#             [sp.diff(state_equations[j], variables[i]) for j in range(len(state_equations))]
-#             for i in range(len(state_variables+control_variables))
-#         ]).reshape(len(state_variables+control_variables), len(state_equations))
-
-#         # Replace SymPy.Zero with float zero
-#         state_derivatives = state_derivatives.applyfunc(lambda x: 0.0 if x == sp.S.Zero else x)
-#         state_derivatives[-1,-1] = 1.0
-
-#         # Construct H
-#         H = sp.Matrix([
-#             sum(co_state * state_derivatives[j,i] for i, co_state in enumerate(co_states_tp1))
-#             for j in range(state_derivatives.shape[0])
-#         ])
-#         # Recursive equilibrium equation
-#         recursive = 1. - rec_cons*p - q
-
-#         # First-order conditions for optimalityprint("Type of q:", type(q))
-#         # Ensure co_states is a flat list
-#         flat_co_states = [x[0] for x in co_states.tolist()] if co_states.shape[1] == 1 else co_states.tolist()
-#         flat_co_states_tp1 = [x[0] for x in co_states_tp1.tolist()] if co_states_tp1.shape[1] == 1 else co_states_tp1.tolist()
-#         # print(np.vstack([np.zeros(n_C), flat_co_states]))
-#         # foc = q * H + p * L - np.vstack([np.zeros(n_C), flat_co_states])
-#         foc = q * H + p * L - sp.Matrix([0]*n_C + flat_co_states)
-
-#         # Output constraint
-#         # print(output_constraint)
-#         output_constraint =  log_cmk_t - output_constraint
-#         # print(output_constraint)
-
-#         # Steady-state conditions for state variables using state equations
-#         state_equations[-1] = var_capital_growth_tp1 - state_equations[-1] 
-#         state_equations = state_equations[-1:] + state_equations[:-1]
-
-#         # print(variables)
-#         variables = variables[:n_C] + [variables[n_X+n_C-1]] + variables[n_C:n_X+n_C-1] + variables[n_X+n_C:]
-        
-#         variables_tp1 = variables_tp1[:n_C] + [variables_tp1[n_X+n_C-1]] + variables_tp1[n_C:n_X+n_C-1] + variables_tp1[n_X+n_C:]
-#         # print(variables)
-
-#         if not isinstance(variables[:n_C], list):
-#             variables = list(variables[:n_C]) + variables[n_C:]
-#         full_variables = sp.symbols(['rmv_t','vmk_t','log_cmk_t']+variables[:n_C]) + flat_co_states + sp.symbols(variables[n_C:])
-#         # print(full_variables)
-#         full_variables_tp1 = sp.symbols(['rmv_tp1','vmk_tp1','log_cmk_tp1']+variables_tp1[:n_C]) + flat_co_states_tp1  + sp.symbols(variables_tp1[n_C:])
-
-#         #Add output constraint
-#         H = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), H)
-#         L = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), L)
-
-#         print(state_equations)
-#         #Create ss function
-#         return [recursive, output_constraint, *foc, *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
-def compile_equations(parameter_names, variables, variables_tp1,control_variables,state_variables,
+def compile_equations(parameter_names, variables, variables_tp1,
                 output_constraint, capital_growth, state_equations, 
                 var_shape):
-            n_J, n_X, n_W = var_shape
-            n_C = n_J - n_X - 1 #number of endogenous state variables apart from cons
-            symbols = {name: sp.Symbol(name) for name in parameter_names}
-            symbols.update({param: sp.Symbol(param) for param in parameter_names})
-            globals().update(symbols)
-
-            
-            state_equations = state_equations + [capital_growth]
-            var_capital_growth_tp1 = sp.Symbol('log_gk_tp1')
-            state_variables = state_variables + ['log_gk_t']
-            state_variables_tp1 = [sp.Symbol(str(state_variables[i]).replace("_t", "_tp1")) for i in range(len(state_variables))]
-            print(state_variables_tp1)
+    n_J, n_X, n_W = var_shape
+    symbols = {name: sp.Symbol(name) for name in parameter_names}
+    symbols.update({param: sp.Symbol(param) for param in parameter_names})
+    globals().update(symbols)
+    # print(symbols)
+    state_equations = state_equations + [capital_growth]
+    #Unpack variables
+    var_investment = sp.Symbol(variables[0])
+    var_capital_growth_tp1 = sp.Symbol(variables_tp1[n_X])
+    state_variables = variables[:n_X+1]
 
 
-            #Add additional variables
-            log_cmk_t = sp.Symbol('log_cmk_t')
-            vmk_t = sp.Symbol('vmk_t')
-            rmv_t = sp.Symbol('rmv_t')
+    #Add additional variables
+    log_cmk_t = sp.Symbol('log_cmk_t')
+    vmk_t = sp.Symbol('vmk_t')
+    rmv_t = sp.Symbol('rmv_t')
 
-            #Costates
-            co_states = [sp.Symbol('m'+str(i)+'_t') for i in range(n_X)]
-            co_states_tp1 = [sp.Symbol('m'+str(i)+'_tp1') for i in range(n_X)]
-            co_states[-1] = sp.Symbol('mg_t')
-            co_states_tp1[-1] = sp.Symbol('mg_tp1')
-            co_states = sp.Matrix(co_states)
-            co_states_tp1 = sp.Matrix(co_states_tp1)
-            
-            # Construct p and q
-            p = (1 - beta) * sp.exp((1 - rho) * (-vmk_t))
-            rec_cons = sp.exp((1 - rho)* (log_cmk_t)) 
-            q = beta * sp.exp((1 - rho) * (rmv_t))
+    #Costates
+    co_states = [sp.Symbol('m'+str(i)+'_t') for i in range(len(state_equations))]
+    co_states_tp1 = [sp.Symbol('m'+str(i)+'_tp1') for i in range(len(state_equations))]
+    co_states[-1] = sp.Symbol('mg_t')
+    co_states_tp1[-1] = sp.Symbol('mg_tp1')
+    co_states = sp.Matrix(co_states)
+    co_states_tp1 = sp.Matrix(co_states_tp1)
+    
+    # Construct p and q
+    p = (1 - beta) * sp.exp((1 - rho) * (-vmk_t))
+    rec_cons = sp.exp((1 - rho)* (log_cmk_t)) 
+    q = beta * sp.exp((1 - rho) * (rmv_t))
 
-            
-            # Consumption derivatives
-            consumption_derivatives = sp.Matrix([
-                sp.diff(output_constraint, variables[i])
-                for i in range(len(state_variables+control_variables))
-            ])
-            consumption_derivatives[-1] = 1.0  # Ensure last derivative is 1
-            L = rec_cons*consumption_derivatives
+    
+    # Consumption derivatives
+    consumption_derivatives = sp.Matrix([
+        sp.diff(output_constraint, variables[i])
+        for i in range(len(state_variables))
+    ])
+    consumption_derivatives[-1] = 1.0  # Ensure last derivative is 1
+    L = rec_cons*consumption_derivatives
 
-            # State derivatives
-            state_derivatives = sp.Matrix([
-                [sp.diff(state_equations[j], variables[i]) for j in range(len(state_equations))]
-                for i in range(len(state_variables+control_variables))
-            ]).reshape(len(state_variables+control_variables), len(state_equations))
+    # State derivatives
+    state_derivatives = sp.Matrix([
+        [sp.diff(state_equations[j], variables[i]) for j in range(len(state_equations))]
+        for i in range(len(state_variables))
+    ]).reshape(len(state_variables), len(state_equations))
 
-            # Replace SymPy.Zero with float zero
-            state_derivatives = state_derivatives.applyfunc(lambda x: 0.0 if x == sp.S.Zero else x)
-            state_derivatives[-1,-1] = 1.0
+    # Replace SymPy.Zero with float zero
+    state_derivatives = state_derivatives.applyfunc(lambda x: 0.0 if x == sp.S.Zero else x)
+    state_derivatives[-1,-1] = 1.0
 
-            # Construct H
-            H = sp.Matrix([
-                sum(co_state * state_derivatives[j,i] for i, co_state in enumerate(co_states_tp1))
-                for j in range(state_derivatives.shape[0])
-            ])
-            # Recursive equilibrium equation
-            recursive = 1. - rec_cons*p - q
+    # Construct H
+    H = sp.Matrix([
+        sum(co_state * state_derivatives[j,i] for i, co_state in enumerate(co_states_tp1))
+        for j in range(state_derivatives.shape[0])
+    ])
 
-            # First-order conditions for optimalityprint("Type of q:", type(q))
-            # Ensure co_states is a flat list
-            flat_co_states = [x[0] for x in co_states.tolist()] if co_states.shape[1] == 1 else co_states.tolist()
-            flat_co_states_tp1 = [x[0] for x in co_states_tp1.tolist()] if co_states_tp1.shape[1] == 1 else co_states_tp1.tolist()
-            # print(np.vstack([np.zeros(n_C), flat_co_states]))
-            # foc = q * H + p * L - np.vstack([np.zeros(n_C), flat_co_states])
-            foc = q * H + p * L - sp.Matrix([0]*n_C + flat_co_states)
+    # Recursive equilibrium equation
+    recursive = 1. - rec_cons*p - q
 
-            # Output constraint
-            # print(output_constraint)
-            output_constraint =  log_cmk_t - output_constraint
+    # First-order conditions for optimalityprint("Type of q:", type(q))
+    # Ensure co_states is a flat list
+    flat_co_states = [x[0] for x in co_states.tolist()] if co_states.shape[1] == 1 else co_states.tolist()
+    flat_co_states_tp1 = [x[0] for x in co_states_tp1.tolist()] if co_states_tp1.shape[1] == 1 else co_states_tp1.tolist()
+    # print(q*H)
+    # print(p*L)
+    foc = q * H + p * L - sp.Matrix([0] + flat_co_states)
 
-            # Steady-state conditions for state variables using state equations
-            state_equations =  [state_variables_tp1[i] - state_equations[i] for i in range(len(state_variables))]
-            # state_equations[-1] = var_capital_growth_tp1 - state_equations[-1] 
-            state_equations = state_equations[-1:] + state_equations[:-1]
+    # Output constraint
+    output_constraint =  log_cmk_t - output_constraint
 
-            # print(variables)
-            variables = variables[:n_C] + [variables[n_X+n_C-1]] + variables[n_C:n_X+n_C-1] + variables[n_X+n_C:]
-            variables_tp1 = variables_tp1[:n_C] + [variables_tp1[n_X+n_C-1]] + variables_tp1[n_C:n_X+n_C-1] + variables_tp1[n_X+n_C:]
-            # print(variables)
+    # Steady-state conditions for state variables using state equations
+    state_equations[-1] = var_capital_growth_tp1 - state_equations[-1] 
+    state_equations = state_equations[-1:] + state_equations[:-1]
 
-            if not isinstance(variables[:n_C], list):
-                variables = list(variables[:n_C]) + variables[n_C:]
-            full_variables = sp.symbols(['rmv_t','vmk_t','log_cmk_t']+variables[:n_C]) + flat_co_states + sp.symbols(variables[n_C:])
-            # print(full_variables)
-            full_variables_tp1 = sp.symbols(['rmv_tp1','vmk_tp1','log_cmk_tp1']+variables_tp1[:n_C]) + flat_co_states_tp1  + sp.symbols(variables_tp1[n_C:])
+    variables = variables[:1] + [variables[n_X]] + variables[1:n_X] + variables[n_X+1:]
+    variables_tp1 = variables_tp1[:1] + [variables_tp1[n_X]] + variables_tp1[1:n_X] + variables_tp1[n_X+1:]
 
-            #Add output constraint
-            H = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), H)
-            L = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), L)
+    full_variables = sp.symbols(['rmv_t','vmk_t','log_cmk_t']+[variables[0]]) + flat_co_states + sp.symbols(variables[1:])
+    full_variables_tp1 = sp.symbols(['rmv_tp1','vmk_tp1','log_cmk_tp1']+[variables_tp1[0]]) + flat_co_states_tp1  + sp.symbols(variables_tp1[1:])
 
-            # print(state_equations)
-            print(state_equations)
-            #Create ss function
-            return [recursive, output_constraint, *foc, *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
-            # return [recursive, output_constraint, foc[0], *foc[3:], *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
-            
+    #Add output constraint
+    H = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), H)
+    L = sp.Matrix.vstack(sp.Matrix([sp.Float(0)]), L)
+
+
+    #Create ss function
+    return [recursive, output_constraint, *foc, *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
+
 def automate_step_1(variables):
     """
     Automatically substitute all variables to their _tp1 counterparts.
@@ -1635,97 +1510,80 @@ def automate_step_1(variables):
 
 
 def generate_ss_function(equations, variables, variables_tp1, initial_guess,var_shape,parameter_names):
-        """
-        Generate a function to solve the steady-state equations.
+    """
+    Generate a function to solve the steady-state equations.
 
-        Parameters:
-        - equations: A callable that takes a list of variables and returns the equations to be solved.
-        - variables: A list of variable names. Ordered as: [rmv, vmk, log_cmk, imh, *states, log_gk, q, *shocks].
-        - variables_tp1: A list of variable names for the next period.
+    Parameters:
+    - equations: A callable that takes a list of variables and returns the equations to be solved.
+    - variables: A list of variable names. Ordered as: [rmv, vmk, log_cmk, imk, *states, log_gk, q, *shocks].
+    - variables_tp1: A list of variable names for the next period.
 
-        Returns:
-        - A function that solves the steady-state equations.
-        """
-        n_J, n_X, n_W = var_shape
-        # print(var_shape)
-        #Make t = t+1
-        substitutions_ss = automate_step_1(variables)
+    Returns:
+    - A function that solves the steady-state equations.
+    """
+    n_J, n_X, n_W = var_shape
+    #Make t = t+1
+    substitutions_ss = automate_step_1(variables)
 
-        #Number of variables preceding states
-        # print(variables)
-        q_t = sp.symbols('q_t')
-        log_gk_t = sp.symbols('log_gk_t')
-        
-        try:
-            n_G = variables.index(log_gk_t)  # Index of growth variable
-            n_Q = variables.index(q_t)      # Index of q
-        except ValueError as e:
-            raise ValueError(f"Variable not found in the list: {e}")
-        #Substitute growth variables
-        substitutions_ss[variables[0]] = variables[n_G]
-        substitutions_ss[variables_tp1[0]] = variables[n_G]
+    #Number of variables preceding states
+    n_G = n_J+2  #index of growth variable
+    n_B = n_G+n_X+1 #index of shock 1
+    n_Q = n_G + n_X
 
-        #Substitute q
-        # print(variables[n_Q])
-        substitutions_ss[variables[n_Q]] = 0.
-        substitutions_ss[variables_tp1[n_Q]] = 0.
+    #Substitute growth variables
+    substitutions_ss[variables[0]] = variables[n_G]
+    substitutions_ss[variables_tp1[0]] = variables[n_G]
 
-        #Substitute shocks
-        # print(variables[n_Q+1:n_Q+n_W+1])
-        for w in variables[n_Q+1:n_Q+n_W+1]:
-            substitutions_ss[w] = 0.
-        for w in variables_tp1[n_Q+1:n_Q+n_W+1]:
-            substitutions_ss[w] = 0.
+    #Substitute q
+    substitutions_ss[variables[n_Q]] = 0.
+    substitutions_ss[variables_tp1[n_Q]] = 0.
 
-        equations = [eq.subs(substitutions_ss) for eq in equations]
-        # print(equations)
-        variables = variables[1:n_Q]
-        def ss_solver(args,return_recursive=False):
-            # Unpack parameters
+    #Substitute shocks
+    for w in variables[n_B:n_B+n_W]:
+        substitutions_ss[w] = 0.
+    for w in variables_tp1[n_B:n_B+n_W]:
+        substitutions_ss[w] = 0.
+    
+    equations = [eq.subs(substitutions_ss) for eq in equations]
+    # print(equations)
+    variables = variables[1:n_Q]
 
-            # Define the function to evaluate the equations
-            def f(x):
-                substituted_equations = [eq.subs({var: val for var, val in zip(parameter_names, args)}) for eq in equations]
-                # Update variables dynamically
-                variable_dict = {str(var): val for var, val in zip(variables, x)}
-                substituted_equations = [eq.subs(variable_dict) for eq in substituted_equations]
-                # Debug: Print substituted equations and variable dictionary
-                print("Variable Dictionary:")
-                for key, value in variable_dict.items():
-                    print(f"  {key}: {value}")
+    def ss_solver(args,return_recursive=False):
+        # Unpack parameters
 
-                print("\nSubstituted Equations:")
-                for idx, eq in enumerate(substituted_equations, start=1):
-                    print(f"  Equation {idx}: {eq}")
-                
-                # Convert to numerical values
-                return anp.array([float(eq.evalf()) for eq in substituted_equations])
+        # Define the function to evaluate the equations
+        def f(x):
+            substituted_equations = [eq.subs({var: val for var, val in zip(parameter_names, args)}) for eq in equations]
+            # Update variables dynamically
+            variable_dict = {str(var): val for var, val in zip(variables, x)}
+            # print("Variable Dict:", variable_dict)
+            # Evaluate equations with updated variables
+            substituted_equations = [eq.subs(variable_dict) for eq in substituted_equations]
+            # print("Substituted Equations:", substituted_equations)
+
+            
+            # Convert to numerical values
+            return anp.array([float(eq.evalf()) for eq in substituted_equations])
 
 
-            # Solve the system of equations
-            root = fsolve(f, initial_guess)
+        # Solve the system of equations
+        root = fsolve(f, initial_guess)
+        # print(root)
+        #Make investment log-investment
 
-            errors = f(root)
-            if any(np.isnan(errors)):
-                raise ValueError("Solution contains NaN values.")
-            if np.linalg.norm(errors, ord=2) > 1e-6:  # Tolerance for error
-                raise ValueError(f"Solution error too large: {np.linalg.norm(errors, ord=2)}")
-
-            if return_recursive:
-                # Convert root[n_G] to a 1x1 Matrix and concatenate with root as a column vector
-                root = np.concatenate([[root[n_G-1]],root])
-                # root = np.array(sp.Matrix.vstack(sp.Matrix([[root[n_G]]]), sp.Matrix(root)))
-            else:
-                # If not recursive, adjust root as needed
-                root = root[1:]
+        if return_recursive:
+            # Convert root[n_G] to a 1x1 Matrix and concatenate with root as a column vector
+            root = np.concatenate([[root[n_G-1]],root])
+            # root = np.array(sp.Matrix.vstack(sp.Matrix([[root[n_G]]]), sp.Matrix(root)))
+        else:
+            # If not recursive, adjust root as needed
+            root = root[1:]
 
 
 
-            return root
+        return root
 
-        return ss_solver
-
-
+    return ss_solver
 
 
 def generate_evaluation_function(equations, variables, variables_tp1, qH, pL, var_shape, parameter_names):
@@ -1808,38 +1666,3 @@ def func_gk(ss_variables,ss_variables_tp1,var_shape):
 
     # Evaluate the lambdified equation
     return ss_variables_tp1[n_G]
-
-
-def change_parameter_value(parameter_name, parameter_names, args, value):
-    """
-    Retrieve the value of a parameter from the args list based on its name.
-
-    Parameters
-    ----------
-    parameter_name : str
-        The name of the parameter to retrieve (e.g., 'beta_2').
-    parameter_names : dict
-        A dictionary mapping parameter names (keys) to symbolic variables (values).
-    args : list
-        A list of parameter values corresponding to the order of parameter_names.
-
-    Returns
-    -------
-    value : float
-        The value of the requested parameter.
-
-    Raises
-    ------
-    ValueError
-        If the parameter name is not found in parameter_names.
-    """
-    # Convert parameter_names keys to a list to get the index
-    try:
-        parameter_index = list(parameter_names.keys()).index(parameter_name)
-    except ValueError:
-        raise ValueError(f"Parameter '{parameter_name}' not found in parameter_names.")
-    
-    args[parameter_index] = value
-    
-    # Retrieve the value from args
-    return args
