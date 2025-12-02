@@ -39,7 +39,7 @@ def compute_derivatives(f,variables,variables_tp1,parameter_names,X,args,var_sha
 
     recursive_variables, main_variables, q_variable, shock_variables = split_variables(variables,var_shape)
     recursive_variables_tp1, main_variables_tp1, q_variable_tp1, shock_variables_tp1 = split_variables(variables_tp1,var_shape)
-
+    
 
     X_0, X_1, W_0, q_0 = X
     X_t, X_tp1, W_tp1, q = main_variables, main_variables_tp1, shock_variables_tp1, q_variable
