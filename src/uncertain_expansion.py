@@ -85,7 +85,7 @@ def uncertain_expansion(control_variables, state_variables, shock_variables, var
         capital_growth=capital_growth,  # Defined symbolic equation
         state_equations=state_equations, # Initial guess for solving the system 
         static_constraints=static_constraints,
-        var_shape=var_shape  # Dimensionality of shocks
+        var_shape=var_shape,  # Dimensionality of shocks
         ExternalHabit=ExternalHabit
     )
     # print(ss_variables)
@@ -1436,7 +1436,7 @@ def compile_equations(parameter_names, variables, variables_tp1,control_variable
     var_capital_growth_tp1 = sp.Symbol('log_gk_tp1')
     state_variables = state_variables + ['log_gk_t']
     state_variables_tp1 = [sp.Symbol(str(state_variables[i]).replace("_t", "_tp1")) for i in range(len(state_variables))]
-    print(state_variables_tp1)
+    # print(state_variables_tp1)
 
 
     #Add additional variables
@@ -1535,7 +1535,7 @@ def compile_equations(parameter_names, variables, variables_tp1,control_variable
     L = sp.Matrix.vstack(sp.Matrix([sp.Float(0), sp.Float(0)]), L)
 
     # print(state_equations)
-    print(state_equations)
+    # print(state_equations)
     #Create ss function
     return [recursive, output_constraint, *static_constraints, *foc, *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
     # return [recursive, output_constraint, foc[0], *foc[3:], *state_equations],full_variables,full_variables_tp1,[*(H)],[*(L)]
@@ -1606,7 +1606,7 @@ def generate_ss_function(equations, variables, variables_tp1, initial_guess,var_
     # return (equations)
     variables = variables[1:n_Q] 
 
-    print(len(equations))
+    # print(len(equations))
     def ss_solver(args,return_recursive=False):
         # Unpack parameters
 

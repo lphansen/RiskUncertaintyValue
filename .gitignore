@@ -2,3 +2,5 @@ src/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+output/
+output_external/
