@@ -3,4 +3,6 @@ src/__pycache__/
 *.pyo
 *.pyd
 output/
+output copy2/
 output_external/
+output_external copy2/

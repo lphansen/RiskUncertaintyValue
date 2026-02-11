@@ -8,7 +8,7 @@ import pickle
 import copy
 from scipy import optimize
 import os
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, root, minimize
 
 from lin_quad_util import E, cal_E_ww, matmul, concat, next_period, kron_prod, log_E_exp, lq_sum, simulate
 from utilities import mat, vec, gschur
@@ -1563,95 +1563,121 @@ def automate_step_1(variables):
             substitutions[tp1_var] = var
     return substitutions
 
-def generate_ss_function(equations, variables, variables_tp1, initial_guess,var_shape,parameter_names):
+def generate_ss_function(equations, variables, variables_tp1, initial_guess, var_shape, parameter_names):
     """
     Generate a function to solve the steady-state equations.
-
-    Parameters:
-    - equations: A callable that takes a list of variables and returns the equations to be solved.
-    - variables: A list of variable names. Ordered as: [rmv, vmk, log_cmk, imh, *states, log_gk, q, *shocks].
-    - variables_tp1: A list of variable names for the next period.
-
-    Returns:
-    - A function that solves the steady-state equations.
+    Includes Fallback Logic: Fast Newton -> Robust Minimization -> Final Newton.
     """
     n_J, n_X, n_W = var_shape
+    
+    # --- 1. PRE-PROCESS EQUATIONS (Symbolic) ---
     substitutions_ss = automate_step_1(variables)
-    # print(variables)
-
-    #Number of variables preceding states
-    # print(variables)
+    
     q_t = sp.symbols('q_t')
     log_gk_t = sp.symbols('log_gk_t')
     
     try:
-        n_G = variables.index(log_gk_t)  # Index of growth variable
-        n_Q = variables.index(q_t)      # Index of q
+        n_G = variables.index(log_gk_t)  
+        n_Q = variables.index(q_t)      
     except ValueError as e:
         raise ValueError(f"Variable not found in the list: {e}")
-    #Substitute growth variables
+
+    # Substitute Growth and Perturbation variables
     substitutions_ss[variables[0]] = variables[n_G]
     substitutions_ss[variables_tp1[0]] = variables[n_G]
-
-    #Substitute q
-    # print(variables[n_Q])
     substitutions_ss[variables[n_Q]] = 0.
     substitutions_ss[variables_tp1[n_Q]] = 0.
 
-    #Substitute shocks
-    # print(variables[n_Q+1:n_Q+n_W+1])
+    # Substitute Shocks with 0
     for w in variables[n_Q+1:n_Q+n_W+1]:
         substitutions_ss[w] = 0.
     for w in variables_tp1[n_Q+1:n_Q+n_W+1]:
         substitutions_ss[w] = 0.
 
+    # Apply substitutions to create the static system
     equations = [eq.subs(substitutions_ss) for eq in equations]
-    # return (equations)
-    variables = variables[1:n_Q] 
+    variables = variables[1:n_Q]
 
-    # print(len(equations))
-    def ss_solver(args,return_recursive=False):
-        # Unpack parameters
-
-        # Define the function to evaluate the equations
+    # --- 2. DEFINE THE NUMERICAL SOLVER ---
+    def ss_solver(args, return_recursive=False):
+        
+        # A. Define the Error Function f(x)
+        # Includes protection against Complex Numbers (e.g. log of negative consumption)
         def f(x):
-            substituted_equations = [eq.subs({var: val for var, val in zip(parameter_names, args)}) for eq in equations]
-            # Update variables dynamically
+            # Substitute Parameters
+            param_subs = {var: val for var, val in zip(parameter_names, args)}
+            substituted_equations = [eq.subs(param_subs) for eq in equations]
+            
+            # Substitute Variables
             variable_dict = {str(var): val for var, val in zip(variables, x)}
             substituted_equations = [eq.subs(variable_dict) for eq in substituted_equations]
-            # Debug: Print substituted equations and variable dictionary
-            # print("Variable Dictionary:")
-            # for key, value in variable_dict.items():
-            #     print(f"  {key}: {value}")
-
-            # print("\nSubstituted Equations:")
-            # for idx, eq in enumerate(substituted_equations, start=1):
-            #     print(f"  Equation {idx}: {eq}") 
-
-            # print(len(substituted_equations))
             
-            # Convert to numerical values
-            return anp.array([float(eq.evalf()) for eq in substituted_equations])
+            # Evaluate safely
+            vals = []
+            for eq in substituted_equations:
+                try:
+                    res = eq.evalf()
+                    # Check if result is complex (e.g. log(-5))
+                    if res.is_complex and not res.is_real:
+                        vals.append(1e10) # Return huge error to push solver away
+                    else:
+                        vals.append(float(res))
+                except (TypeError, ValueError):
+                    vals.append(1e10) # Catch conversion errors
+            
+            return np.array(vals)
 
+        # B. Define Squared Error for Minimizer (Fallback)
+        def f_norm(x):
+            errs = f(x)
+            return np.sum(errs**2)
 
-        # Solve the system of equations
-        root = fsolve(f, initial_guess)
+        # --- C. ATTEMPT 1: STANDARD SOLVER (Fast) ---
+        # Corresponds to fsolve logic
+        success = False
+        final_root = None
 
+        try:
+            sol = root(f, initial_guess, method='hybr', tol=1e-8)
+            if sol.success:
+                final_root = sol.x
+                success = True
+        except Exception:
+            success = False
+
+        # --- D. ATTEMPT 2: ROBUST FALLBACK (If Attempt 1 Failed) ---
+        if not success:
+            print("    > Standard solver failed. Switching to Robust Minimization...")
+            try:
+                # 1. Minimize squared error to enter the 'Basin of Attraction'
+                # L-BFGS-B is very stable
+                res_min = minimize(f_norm, initial_guess, method='L-BFGS-B', tol=1e-5)
+                
+                # 2. Polish with Root Finder starting from the minimized point
+                sol = root(f, res_min.x, method='hybr', tol=1e-8)
+                
+                final_root = sol.x
+                
+                # Final check
+                if np.linalg.norm(f(final_root)) < 5e-4:
+                    success = True
+                else:
+                    print(f"    WARNING: Solver did not fully converge. Error: {np.linalg.norm(f(final_root))}")
+                    
+            except Exception as e:
+                print(f"    > Critical Failure in Robust Solver: {e}")
+                # Fallback to initial guess to prevent crash (though likely bad)
+                final_root = initial_guess
+
+        # --- E. RETURN RESULT ---
         if return_recursive:
-            # Convert root[n_G] to a 1x1 Matrix and concatenate with root as a column vector
-            root = np.concatenate([[root[n_G-1]],root])
-            # root = np.array(sp.Matrix.vstack(sp.Matrix([[root[n_G]]]), sp.Matrix(root)))
+            root_res = np.concatenate([[final_root[n_G-1]], final_root])
         else:
-            # If not recursive, adjust root as needed
-            root = root[1:]
+            root_res = final_root[1:]
 
-
-
-        return root
+        return root_res
 
     return ss_solver
-
-
 
 
 
